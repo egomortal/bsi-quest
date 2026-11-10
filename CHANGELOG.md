@@ -39,6 +39,10 @@ What the project can do today (build 143), grouped by area. This is a summary of
 Tile-based (GMEM) rendering, low-resolution Z, fp16 materials, shadow-map caching between frames, tiled shadow projection,
 adaptive or single submit per frame, more frames in flight, shadow-mask pass merging, bloom or post-chain removal for speed.
 
+## Install
+
+- One-script install from a Windows PC: checks the game build, installs the app, copies game data, driver and settings.
+
 ## Tooling
 
 - Hands-off test lab: a PC runner installs builds over adb, loads any of about 30 checkpoints, measures per-pass GPU time and
@@ -49,5 +53,5 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
 ## Not done yet
 
 - A permanent 36 fps at full Ultra in every area.
-- One-command conversion from a game folder (see `PIPELINE.md`).
+- One-command rebuild of the app from a game folder (see `PIPELINE.md`).
 - Anti-aliasing beyond the game's FXAA; gameplay mods.

@@ -1,0 +1,3 @@
+# BSI-Quest mod switches (ext72, written by the in-game mod menu). <mod> 0|1. Delete this file for the built-in defaults.
+perks 1
+gear 1

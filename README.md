@@ -5,22 +5,43 @@ Tools that turn **your own Steam copy** of BioShock Infinite into a native ARM64
 The Windows game (32-bit x86, Unreal Engine 3) is statically recompiled: x86 machine code -> C -> ARM64. The translated game
 runs on our own runtime (Win32 and Direct3D 11 layers) on top of DXVK 3.1.1 and the Turnip Vulkan driver.
 
-**This repository contains no game content.** No executables, no translated game code, no assets, no shaders from the game,
-no Ghidra exports. You need your own copy of the game; everything game-derived is produced on your PC and stays there.
-There is no DRM bypass: the loader starts the game at its real entry point and Steam is reported as unavailable.
+**You need your own Steam copy of the game.** The source tree here holds only our own code: no executables, no assets, no
+shaders from the game, no Ghidra exports. The app on the Releases page contains the game's program code in translated form and
+nothing else; all game data (levels, textures, sound, the exe itself) is copied from your Steam folder by the installer, which
+refuses to run without the matching game. There is no DRM bypass: the loader starts the game at its real entry point and Steam
+is reported as unavailable.
+
+## Install (Windows PC + Quest 3)
+
+1. Install BioShock Infinite from Steam on your PC (DLC optional). The headset needs about 45 GB free with DLC, 20 GB without.
+2. Turn on developer mode on the Quest, connect it by USB and accept the debugging prompt. Install SideQuest if you have no adb.
+3. Download `bsi-quest.apk` and `vulkan.ad07xx.so` from the Releases page into the `install` folder of this repository.
+4. Run:
+
+   ```
+   powershell -ExecutionPolicy Bypass -File install\Install-BSIQuest.ps1
+   ```
+
+   Add `-DryRun` to see what it would do, `-NoDLC` to skip the DLC, `-Game <folder>` if Steam is not found.
+
+The script checks that your `BioShockInfinite.exe` is the build the app was made from, installs the app, copies the game data
+(re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
+Steam folder and does not delete or overwrite anything already on the headset.
 
 ## State
 
 - Build 143: the whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.
 - Frame time at the heaviest spots is 30-43 ms against a 27.8 ms (36 fps) target; see `CHANGELOG.md`.
-- The conversion is **not one command yet**. `setup.py` checks your inputs and tells you which stages are ready;
-  `PIPELINE.md` lists every stage and the known gaps honestly.
+- Tested on one Quest 3 with the current Steam build of the game. Other headsets and other game builds are not supported.
+- Building the app yourself from your own exe (instead of using the release) is described in `PIPELINE.md`; that route is
+  not one command yet and `setup.py` reports which of its stages are ready.
 
 ## Layout
 
 | Folder | What it is |
 |---|---|
-| `setup.py` | Entry point: checks the game folder and the tools, reports the state of each pipeline stage |
+| `install/` | Installer script and the default settings files for the headset |
+| `setup.py` | For building from source: checks the game folder and the tools, reports the state of each pipeline stage |
 | `ghidra/` | Ghidra scripts that export function bodies, the call graph and imports from your exe |
 | `translator/` | x86 -> C translator (`x86c.py`, `vec_ops.py`, `genall.py`), exception-handling scan (`eh/`), build and link scripts |
 | `runtime/linux/` | Base runtime: Win32 layer, COM/D3D11 bridge, audio, input, OpenXR glue |
