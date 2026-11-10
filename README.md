@@ -1,6 +1,7 @@
 # BSI-Quest
 
-Tools that turn **your own Steam copy** of BioShock Infinite into a native ARM64 app for Meta Quest 3, with stereo VR.
+Tools that turn **your own Steam copy** of BioShock Infinite into a native ARM64 app for Meta Quest 3, with stereo VR
+at full PC Ultra settings.
 
 The Windows game (32-bit x86, Unreal Engine 3) is statically recompiled: x86 machine code -> C -> ARM64. The translated game
 runs on our own runtime (Win32 and Direct3D 11 layers) on top of DXVK 3.1.1 and the Turnip Vulkan driver.
@@ -35,9 +36,37 @@ logs on your PC, which you can attach to an issue. We ask because the project is
 your sessions show us game code that still has to be translated, levels that run slowly, and crashes. `REPORTS.md` lists
 exactly what is in a report, what is not (no saves, screenshots, serial number or account data), and what we do with it.
 
-## State
+## Why Quest 3 only
 
-- The whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.
+This is the full PC game at PC Ultra settings, rendered twice (once per eye), on a phone-class chip. The Quest 3's GPU
+(Adreno 740) is the least that can do it, and it is still about a third short of the target at the heaviest spots. There
+is no headroom to give away: Quest 2 and Quest Pro have roughly half the GPU, so they are not supported, and we are not
+planning lower-quality modes to make them fit.
+
+The picture is not allowed to get worse to gain speed. That rules out the usual shortcuts of standalone VR: no foveated
+rendering, no lower eye resolution, no frame generation (SpaceWarp), no TAA. Every optimisation in this project gives
+the same picture as before, proven by a bit-for-bit comparison, and that is the rule for contributions too.
+
+## Current state
+
+- The whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display. Saves, DLC and all
+  languages work.
+- Target: a steady 36 fps (27.8 ms per frame, every second refresh at 72 Hz). Measured at fixed test spots (4 Nov 2026):
+
+  | Spot | Frame ms | fps |
+  |---|---|---|
+  | Downtown Emporia | 42.2 | 23.7 |
+  | Fair entrance (crowd) | 40.7 | 24.6 |
+  | Rooftops | 39.6 | 25.3 |
+  | Gondola | 32.7 | 30.6 |
+  | Cab ride | 31.5 | 31.7 |
+  | Battleship Bay lift | 26.5 | 37.7 |
+  | Monument Island library | 25.3 | 39.5 |
+  | Garden | 23.5 | 42.6 |
+  | Raffle crowd | 23.4 | 42.7 |
+  | Founders Lodge | 20.3 | 49.3 |
+
+  Five of the ten spots meet the target. The heaviest need about a third less GPU time.
 - Two release channels on the Releases page:
   - **Stable** (marked "Latest"): build 142, the build that has been played on a headset. Use this one.
   - **Experimental** (marked "Pre-release"): build 143 and later. Newer optimisations and fixes, less tested, may be
@@ -46,10 +75,36 @@ exactly what is in a report, what is not (no saves, screenshots, serial number o
   install an older build over a newer one: going back from experimental to stable means uninstalling the app first,
   which also removes the game data copied to the headset, so the installer has to copy it again. Saves and settings
   live in `/sdcard/BSI` and are kept.
-- Frame time at the heaviest spots is 30-43 ms against a 27.8 ms (36 fps) target; see `CHANGELOG.md`.
-- Tested on one Quest 3 with the current Steam build of the game. Other headsets and other game builds are not supported.
-- Building the app yourself from your own exe (instead of using the release) is described in `PIPELINE.md`; that route is
-  not one command yet and `setup.py` reports which of its stages are ready.
+- Tested on one Quest 3 with the current Steam build of the game. Other game builds are rejected by the installer.
+- What has been done so far is in `CHANGELOG.md`, including the ideas that were measured and rejected.
+
+## Plans
+
+In order:
+
+1. **36 fps everywhere.** The biggest costs left are the soft-shadow pass (11-14 ms at the heaviest spots), the scene
+   colour and G-buffer passes, and a render-thread wait on occlusion-query results (about 7 ms per frame at the Fair).
+2. **One pass for both eyes** (single-pass stereo). Today every draw is issued twice; this is the main render-thread lever.
+3. **Translate the rest of the game code.** Play reports (see above) tell us which code players reach that the
+   translator has not seen. When reports come back empty, the fallback emulator is removed.
+4. **Build from your own copy in one command.** `PIPELINE.md` lists the stages and the gaps; `setup.py` reports which
+   stages are ready on your PC.
+5. **Anti-aliasing without TAA**, once the frame rate is there.
+6. **Gameplay mods** (gear, weapon wheel, new enemy variants), after the VR goal is met.
+
+## Contributing
+
+Fixes and improvements are welcome **in this repository**. Please do not publish your own fork or your own builds as a
+separate version: players then have to work out which one to install, fixes stop reaching each other, and a build made
+from a different tree cannot be compared with our measurements. Send the change here and it ships to everyone in the
+next experimental release, with your name on the commit.
+
+- Small fix: open a pull request against `main`. Regular contributors get push access.
+- Bigger idea: open an issue first so nobody builds something that was already measured and rejected (`CHANGELOG.md`).
+- Using an AI assistant: `AGENTS.md` has the exact text to give it.
+
+The rules (same picture, a switch for every change, measured before and after) and the practical steps are in
+`CONTRIBUTING.md`.
 
 ## Layout
 
