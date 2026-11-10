@@ -15,7 +15,7 @@ is reported as unavailable.
 
 1. Install BioShock Infinite from Steam on your PC (DLC optional). The headset needs about 45 GB free with DLC, 20 GB without.
 2. Turn on developer mode on the Quest, connect it by USB and accept the debugging prompt. Install SideQuest if you have no adb.
-3. Download `bsi-quest.apk` and `vulkan.ad07xx.so` from the Releases page into the `install` folder of this repository.
+3. Download `bsi-quest.apk` and `vulkan.ad07xx.so` from the stable release ("Latest") on the Releases page into the `install` folder of this repository.
 4. Run:
 
    ```
@@ -31,8 +31,13 @@ Steam folder and does not delete or overwrite anything already on the headset.
 ## State
 
 - The whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.
-- The release is build 142, the last build played on a headset. The source tree is one build ahead (143: a fix for an
-  occasional slow state at the Fair, about 12 fps until the level is reloaded); it becomes the release once tested.
+- Two release channels on the Releases page:
+  - **Stable** (marked "Latest"): build 142, the build that has been played on a headset. Use this one.
+  - **Experimental** (marked "Pre-release"): build 143 and later. Newer optimisations and fixes, less tested, may be
+    broken. Build 143 fixes an occasional slow state at the Fair (about 12 fps until the checkpoint is reloaded).
+  A build moves to stable after it has been played without problems. Both use the same installer. Android does not
+  install an older build over a newer one: going back from experimental to stable means uninstalling the app first,
+  which also removes the game data copied to the headset, so the installer has to copy it again.
 - Frame time at the heaviest spots is 30-43 ms against a 27.8 ms (36 fps) target; see `CHANGELOG.md`.
 - Tested on one Quest 3 with the current Steam build of the game. Other headsets and other game builds are not supported.
 - Building the app yourself from your own exe (instead of using the release) is described in `PIPELINE.md`; that route is
