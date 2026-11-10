@@ -28,6 +28,13 @@ The script checks that your `BioShockInfinite.exe` is the build the app was made
 (re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
 Steam folder and does not delete or overwrite anything already on the headset.
 
+## Help us: play reports (opt-in)
+
+The app never sends anything by itself. If you want to help, `install\Send-Report.ps1` makes a zip of your last session's
+logs on your PC, which you can attach to an issue. We ask because the project is tested on one headset at about 30 spots:
+your sessions show us game code that still has to be translated, levels that run slowly, and crashes. `REPORTS.md` lists
+exactly what is in a report, what is not (no saves, screenshots, serial number or account data), and what we do with it.
+
 ## State
 
 - The whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.

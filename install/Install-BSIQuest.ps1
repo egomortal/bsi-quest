@@ -178,7 +178,7 @@ if (-not ($existing -contains "bsi.log")) {
   $tmp = Join-Path $env:TEMP "bsi_placeholder.log"
   Set-Content -Path $tmp -Value "placeholder written by Install-BSIQuest.ps1" -Encoding ascii
   Run-Adb push $tmp "$CfgDst/bsi.log" | Out-Null
-  Remove-Item $tmp
+  Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
   Say "created  bsi.log"
 }
 

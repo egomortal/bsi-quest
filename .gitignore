@@ -22,3 +22,4 @@ sdk/
 BioShock*/
 __pycache__/
 *.log
+install/reports/
