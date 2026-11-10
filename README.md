@@ -125,6 +125,12 @@ The rules (same picture, a switch for every change, measured before and after) a
 | `lab/` | Hands-off Quest test runner (PowerShell + adb): queued jobs, scenarios, automatic measurement |
 | `tools/` | Analysis and workflow tools (job tables, dump comparison, build bookkeeping) |
 
+## AI assistance
+
+Most of this project's code was written with AI coding assistants, directed, measured and tested by a human on real
+hardware. Every performance claim here comes from a measurement on the headset, not from a model. If you would rather
+not use AI-assisted software, that is completely fine; this project is probably not for you.
+
 ## Third-party code
 
 DXVK (zlib licence) and Mesa (MIT) are not included; only our patches against them are. SMAA (MIT, see
