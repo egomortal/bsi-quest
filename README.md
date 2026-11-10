@@ -43,6 +43,9 @@ This is the full PC game at PC Ultra settings, rendered twice (once per eye), on
 is no headroom to give away: Quest 2 and Quest Pro have roughly half the GPU, so they are not supported, and we are not
 planning lower-quality modes to make them fit.
 
+The **Quest 3S** uses the same chip as the Quest 3, so it should run the same; it has not been tested yet. If you
+have one, a play report would tell us.
+
 The picture is not allowed to get worse to gain speed. That rules out the usual shortcuts of standalone VR: no foveated
 rendering, no lower eye resolution, no frame generation (SpaceWarp), no TAA. Every optimisation in this project gives
 the same picture as before, proven by a bit-for-bit comparison, and that is the rule for contributions too.

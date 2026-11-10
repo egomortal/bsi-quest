@@ -94,7 +94,8 @@ if ($devices.Count -eq 0) { Fail "No headset found. Connect the Quest by USB, tu
 if ($devices.Count -gt 1) { Fail "More than one adb device is connected. Disconnect the others and run again." }
 $model = (Run-Adb shell getprop ro.product.model | Select-Object -First 1).Trim()
 Say "device: $model"
-if ($model -ne "Quest 3") { Say "WARNING: this build was made and tested on a Quest 3 only (Adreno 740). '$model' may not work." }
+if ($model -eq "Quest 3S") { Say "NOTE: the Quest 3S has the same chip as the Quest 3 (Snapdragon XR2 Gen 2, Adreno 740), so it should work, but it has not been tested yet. Please send a play report (REPORTS.md)." }
+elseif ($model -ne "Quest 3") { Say "WARNING: this build was made and tested on a Quest 3 only (Adreno 740). '$model' has a slower GPU and is not expected to work." }
 
 # ---------------------------------------------------------------- 2. game folder
 Step "Game folder"
