@@ -143,9 +143,16 @@ Most of this project's code was written with AI coding assistants, directed, mea
 hardware. Every performance claim here comes from a measurement on the headset, not from a model. If you would rather
 not use AI-assisted software, that is completely fine; this project is probably not for you.
 
+## Licence
+
+BSI-Quest's own code is free software under the **GNU GPL version 3** with one additional permission that allows it to
+be combined with the translated code of the game (`LICENSE`, `LICENSE-EXCEPTION.md`). In short: you may use, change and
+share it, and if you share a changed version you must share your source under the same terms. The licence covers our
+code only; it gives no rights to the game.
+
 ## Third-party code
 
-DXVK (zlib licence) and Mesa (MIT) are not included; only our patches against them are. SMAA (MIT, see
+DXVK (zlib licence) and Mesa (MIT) are not included; only our patches against them are, under those same licences. SMAA (MIT, see
 `kit/src_b1n/linux/SMAA_LICENSE.txt`) is included. Unicorn (GPL-2.0) is built separately and linked as a fallback emulator.
 
 BSI-Quest is an unofficial fan project. BioShock Infinite is a trademark of Take-Two Interactive; this project is not

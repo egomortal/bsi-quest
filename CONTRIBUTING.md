@@ -37,7 +37,11 @@ not *publishing* a competing version.
 5. **No game content in commits.** No game files, no translated game code (`gen*/`, objects, `.so`, APK), no Ghidra
    exports, no dumps or captures of the game. The `.gitignore` blocks the common ones; check your diff anyway.
 6. **No DRM bypass and no piracy help.** The installer's check for a real Steam copy stays.
-7. **Licences.** Do not paste code from GPL projects or from Unreal Engine source. Ideas are fine, code is not.
+7. **Licences.** Your contribution is licensed like the rest of the project: GPL version 3 with the additional
+   permission in `LICENSE-EXCEPTION.md` (patches in `patches/dxvk/` and `patches/mesa/` keep the upstream licence). Do
+   not paste code from other projects, including GPL ones: their authors have not granted that additional permission,
+   so their code cannot go into a build that contains translated game code. Never paste Unreal Engine source. Ideas
+   are fine, code is not.
 
 ## What you can work on without a full build
 

@@ -26,8 +26,9 @@ Hard rules. Do not break them, and tell me if my request would break one:
    a stated default. The off value must reproduce the previous behaviour exactly.
 4. Never add game content to the repository: no game files, no translated game code (gen*/, *.o, *.so, *.apk), no
    Ghidra exports, no dumps or screenshots of the game. Never weaken the installer's check for a real Steam copy.
-5. Never copy code from GPL projects or from Unreal Engine source. Never push DXVK or Mesa trees; our changes to them
-   live as patch files in patches/.
+5. The project is GPL-3.0 with an additional permission (LICENSE-EXCEPTION.md). Never copy code from other projects
+   (GPL ones included: they do not carry that permission) or from Unreal Engine source. Never push DXVK or Mesa trees;
+   our changes to them live as patch files in patches/ under the upstream licences.
 6. Do not invent results. If you did not build or measure something, say "not built" or "not measured". Frame times
    count only when measured on a Quest 3 at the standard spots (Fair, Rooftops, Gondola, Cab ride).
 7. Before proposing an optimisation, check CHANGELOG.md "Measured and rejected". Do not re-propose a listed idea
