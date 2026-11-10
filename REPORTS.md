@@ -1,6 +1,10 @@
 # Play reports (opt-in)
 
-BSI-Quest never sends anything anywhere by itself. The app has no upload code and does not use the network.
+BSI-Quest never sends anything anywhere by itself. Our code contains no upload or telemetry code, and the game's own
+network functions are not implemented (Steam is reported as unavailable). The app does declare Android's internet
+permission, for one thing: a small debug console that listens only on the headset itself (`127.0.0.1:27183`) and can
+be reached only through the USB debugging cable (`adb forward`). You can check this in `kit/src_b1n/linux/android_glue.c`.
+
 If you want to help, you can make a report of your last play session and share it. This page says exactly why we ask,
 what is in a report, and what happens to it.
 
