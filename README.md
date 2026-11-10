@@ -12,9 +12,19 @@ nothing else; all game data (levels, textures, sound, the exe itself) is copied 
 refuses to run without the matching game. There is no DRM bypass: the loader starts the game at its real entry point and Steam
 is reported as unavailable.
 
+## What you need
+
+| | |
+|---|---|
+| Headset | Meta Quest 3 (Quest 3S: same chip, untested) |
+| Free space on the headset | about **45 GB** with the DLC, about **20 GB** without |
+| Game | BioShock Infinite, Steam version, installed on your PC (about 43 GB on the PC with DLC) |
+| PC | Windows, with adb (SideQuest includes it) and a USB cable |
+| Headset setting | Developer mode on |
+
 ## Install (Windows PC + Quest 3)
 
-1. Install BioShock Infinite from Steam on your PC (DLC optional). The headset needs about 45 GB free with DLC, 20 GB without.
+1. Install BioShock Infinite from Steam on your PC (DLC optional).
 2. Turn on developer mode on the Quest, connect it by USB and accept the debugging prompt. Install SideQuest if you have no adb.
 3. Download `bsi-quest.apk` and `vulkan.ad07xx.so` from the stable release ("Latest") on the Releases page into the `install` folder of this repository.
 4. Run:
