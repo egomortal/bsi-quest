@@ -30,7 +30,9 @@ Steam folder and does not delete or overwrite anything already on the headset.
 
 ## State
 
-- Build 143: the whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.
+- The whole game runs natively on Quest 3 in stereo VR at full Ultra, floating HUD, 72 Hz display.
+- The release is build 142, the last build played on a headset. The source tree is one build ahead (143: a fix for an
+  occasional slow state at the Fair, about 12 fps until the level is reloaded); it becomes the release once tested.
 - Frame time at the heaviest spots is 30-43 ms against a 27.8 ms (36 fps) target; see `CHANGELOG.md`.
 - Tested on one Quest 3 with the current Steam build of the game. Other headsets and other game builds are not supported.
 - Building the app yourself from your own exe (instead of using the release) is described in `PIPELINE.md`; that route is
