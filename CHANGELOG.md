@@ -41,6 +41,7 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
 
 ## Install
 
+- Two display modes, chosen at install and switchable later: VR (stereo) and Flat (big virtual screen, one view).
 - One-script install from a Windows PC: checks the game build, installs the app, copies game data, driver and settings.
 
 ## Tooling

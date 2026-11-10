@@ -92,15 +92,17 @@ if ($FromFolder) {
   $device += "source: local folder (no headset queried)"
 } else {
   $adbExe = Find-Adb
-  $devs = @(& $adbExe devices 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match "\tdevice$" })
+  # Windows PowerShell turns stderr of a native program into errors; with "Stop" a missing file on the headset would abort.
+  function Nat { $ErrorActionPreference = "Continue"; & $adbExe @args 2>&1 | ForEach-Object { "$_" } }
+  $devs = @(Nat devices | Where-Object { $_ -match "\tdevice$" })
   if ($devs.Count -ne 1) { Fail "Expected exactly one connected headset, found $($devs.Count)." }
   foreach ($f in ($Logs + $Config)) {
-    & $adbExe pull "/sdcard/BSI/$f" (Join-Path $work $f) 2>&1 | Out-Null     # a missing file is fine
+    Nat pull "/sdcard/BSI/$f" (Join-Path $work $f) | Out-Null     # a missing file is fine
   }
-  $device += "model: " + ((& $adbExe shell getprop ro.product.model) -join "").Trim()
-  $device += "os build: " + ((& $adbExe shell getprop ro.build.display.id) -join "").Trim()
-  $device += "android: " + ((& $adbExe shell getprop ro.build.version.release) -join "").Trim()
-  $vc = (& $adbExe shell dumpsys package $Package 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match "versionCode=(\d+)" } | Select-Object -First 1)
+  $device += "model: " + ((Nat shell getprop ro.product.model) -join "").Trim()
+  $device += "os build: " + ((Nat shell getprop ro.build.display.id) -join "").Trim()
+  $device += "android: " + ((Nat shell getprop ro.build.version.release) -join "").Trim()
+  $vc = (Nat shell dumpsys package $Package | Where-Object { $_ -match "versionCode=(\d+)" } | Select-Object -First 1)
   if ($vc -match "versionCode=(\d+)") { $device += "bsi-quest build: " + $Matches[1] } else { $device += "bsi-quest build: not installed?" }
 }
 $logPath = Join-Path $work "bsi.log"

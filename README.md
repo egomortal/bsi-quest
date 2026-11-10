@@ -33,11 +33,29 @@ is reported as unavailable.
    powershell -ExecutionPolicy Bypass -File install\Install-BSIQuest.ps1
    ```
 
-   Add `-DryRun` to see what it would do, `-NoDLC` to skip the DLC, `-Game <folder>` if Steam is not found.
+   Add `-DryRun` to see what it would do, `-NoDLC` to skip the DLC, `-Mode Flat` for the big-screen mode,
+   `-Game <folder>` if Steam is not found.
 
 The script checks that your `BioShockInfinite.exe` is the build the app was made from, installs the app, copies the game data
 (re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
 Steam folder and does not delete or overwrite anything already on the headset.
+
+## Two ways to play: VR or Flat
+
+| Mode | What you get | Speed |
+|---|---|---|
+| **VR** (default) | Stereo 3D: you stand inside Columbia, the HUD floats in front of you, you aim with the controller | Two views are drawn, so this is the heavy mode: 24-49 fps depending on the area |
+| **Flat** | The game on a big virtual screen in front of you, like a private cinema | One view is drawn, so it runs roughly twice as fast |
+
+Pick one when you install (`-Mode VR` or `-Mode Flat`), and switch whenever you like:
+
+```
+powershell -ExecutionPolicy Bypass -File install\Set-Mode.ps1 -Mode Flat
+powershell -ExecutionPolicy Bypass -File install\Set-Mode.ps1 -Mode VR
+```
+
+Close the game first; the mode is read when it starts. Switching keeps your VR settings and your saves. An in-headset
+menu for this is on the list below; for now it is a script on the PC.
 
 ## Help us: play reports (opt-in)
 
@@ -91,21 +109,28 @@ the same picture as before, proven by a bit-for-bit comparison, and that is the 
 - Tested on one Quest 3 with the current Steam build of the game. Other game builds are rejected by the installer.
 - What has been done so far is in `CHANGELOG.md`, including the ideas that were measured and rejected.
 
-## Plans
+## What's next
 
-In order:
+Roughly in this order. None of it has a date; each item ships to the experimental channel when it is measured and proven.
 
-1. **36 fps everywhere.** The biggest costs left are the soft-shadow pass (11-14 ms at the heaviest spots), the scene
-   colour and G-buffer passes, and a render-thread wait on occlusion-query results (about 7 ms per frame at the Fair).
+1. **36 fps everywhere in VR.** The biggest costs left are the soft-shadow pass (11-14 ms at the heaviest spots), the
+   scene colour and G-buffer passes, and a render-thread wait on occlusion-query results (about 7 ms per frame at the Fair).
 2. **One pass for both eyes** (single-pass stereo). Today every draw is issued twice; this is the main render-thread lever.
-3. **Translate the rest of the game code.** Play reports (see above) tell us which code players reach that the
-   translator has not seen. When reports come back empty, the fallback emulator is removed.
-4. **A smaller install.** Build 144 can record which parts of the 43 GB of game data are ever read (`REPORTS.md`).
+3. **Get rid of the "ants".** At headset resolution, thin and shiny things crawl and shimmer as you move your head:
+   railings, wires, fences, foliage, specular highlights. The game's own answer on PC is FXAA, which blurs edges but does
+   not stop the crawl, and the usual VR fix (TAA) smears the picture, so we ruled it out. The plan is to remove the
+   causes instead: multisampling where the hardware gives it cheaply, specular anti-aliasing for the shimmer on shiny
+   surfaces, and special handling for thin geometry. This starts once the frame rate is there, because all of it costs
+   GPU time. This is the one area where the picture is meant to change, so it will be judged on side-by-side captures
+   and stay behind a switch.
+4. **Translate the rest of the game code.** Play reports (see above) tell us which code players reach that the
+   translator has not seen, so nobody hits the slow fallback emulator.
+5. **A smaller install.** Build 144 can record which parts of the 43 GB of game data are ever read (`REPORTS.md`).
    Once maps cover the whole game, the installer can leave unused data off the headset.
-5. **Build from your own copy in one command.** `PIPELINE.md` lists the stages and the gaps; `setup.py` reports which
+6. **Choose VR or Flat inside the headset**, instead of with a script on the PC.
+7. **Build from your own copy in one command.** `PIPELINE.md` lists the stages and the gaps; `setup.py` reports which
    stages are ready on your PC.
-6. **Anti-aliasing without TAA**, once the frame rate is there.
-7. **Gameplay mods** (gear, weapon wheel, new enemy variants), after the VR goal is met.
+8. **Gameplay mods** (gear, weapon wheel, new enemy variants), after the VR goal is met.
 
 ## Contributing
 
@@ -125,7 +150,7 @@ The rules (same picture, a switch for every change, measured before and after) a
 
 | Folder | What it is |
 |---|---|
-| `install/` | Installer script and the default settings files for the headset |
+| `install/` | Installer, VR/Flat mode switch, play-report script, and the default settings files for the headset |
 | `setup.py` | For building from source: checks the game folder and the tools, reports the state of each pipeline stage |
 | `ghidra/` | Ghidra scripts that export function bodies, the call graph and imports from your exe |
 | `translator/` | x86 -> C translator (`x86c.py`, `vec_ops.py`, `genall.py`), exception-handling scan (`eh/`), build and link scripts |

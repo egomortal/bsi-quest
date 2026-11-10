@@ -15,12 +15,14 @@
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -Game "D:\SteamLibrary\steamapps\common\BioShock Infinite" -NoDLC
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -DryRun      # show what would happen, change nothing
+    powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -Mode Flat   # big-screen mode instead of VR (Set-Mode.ps1 switches later)
 #>
 param(
   [string]$Game = "",
   [string]$Apk = (Join-Path $PSScriptRoot "bsi-quest.apk"),
   [string]$Driver = (Join-Path $PSScriptRoot "vulkan.ad07xx.so"),
   [string]$Adb = "",
+  [ValidateSet("VR", "Flat")][string]$Mode = "VR",
   [switch]$NoDLC,
   [switch]$SkipGameData,
   [switch]$ResetSettings,
@@ -41,6 +43,7 @@ function Fail($t) { Write-Host ""; Write-Host "STOPPED: $t" -ForegroundColor Red
 
 function Run-Adb {
   # Runs adb and returns its output lines; stops the script when adb fails.
+  $ErrorActionPreference = "Continue"   # Windows PowerShell turns native stderr into errors; do not abort on adb progress text
   $out = & $script:Adb @args 2>&1 | ForEach-Object { "$_" }
   if ($LASTEXITCODE -ne 0) { Fail ("adb " + ($args -join " ") + "`n" + ($out -join "`n")) }
   return $out
@@ -144,6 +147,7 @@ if ($DryRun) {
   Say "  install $Apk"
   if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst") }
   Say "  copy the driver to $CfgDst/turnip/ and the settings in $CfgSrc to $CfgDst"
+  Say "  set the display mode to $Mode (VR = stereo 3D, Flat = big virtual screen)"
   exit 0
 }
 
@@ -158,7 +162,7 @@ if (-not $SkipGameData) {
   Run-Adb shell mkdir -p $GameDst | Out-Null
   foreach ($f in $folders) {
     Say "-> $f"
-    & $script:Adb push --sync (Join-Path $Game $f) "$GameDst/"
+    $ErrorActionPreference = "Continue"; & $script:Adb push --sync (Join-Path $Game $f) "$GameDst/"; $ErrorActionPreference = "Stop"
     if ($LASTEXITCODE -ne 0) { Fail "Copying '$f' failed. Check the cable and run the script again; it continues where it stopped." }
   }
 }
@@ -183,6 +187,12 @@ if (-not ($existing -contains "bsi.log")) {
   Say "created  bsi.log"
 }
 
+# ---------------------------------------------------------------- 7. display mode
+Step "Display mode: $Mode"
+& (Join-Path $PSScriptRoot "Set-Mode.ps1") -Mode $Mode -Adb $script:Adb
+if ($LASTEXITCODE -ne 0) { Fail "Could not set the display mode. Run install\Set-Mode.ps1 -Mode $Mode yourself." }
+
 Step "Done"
 Say "Put the headset on and start 'BSI Quest' from Unknown Sources in your app library."
+Say "Switch between VR and the big-screen Flat mode any time with install\Set-Mode.ps1 -Mode VR / -Mode Flat."
 Say "The first start compiles shaders and stutters for a few minutes. Logs: $CfgDst/bsi.log"
