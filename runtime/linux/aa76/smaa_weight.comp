@@ -1,0 +1,26 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// smaa_weight.comp -- job aa76: SMAA 1x pass 2 (blending weight calculation) per eye pixel -> weights (RGBA8)
+layout(local_size_x = 8, local_size_y = 8) in;
+#include "aa76_common.glsl"
+layout(set = 0, binding = 5) uniform texture2D t_edges;
+layout(set = 0, binding = 7) uniform texture2D t_area;
+layout(set = 0, binding = 8) uniform texture2D t_search;
+layout(set = 0, binding = 10, rgba8) uniform writeonly image2D o_blend;
+#define HAVE_EDGES 1
+#define HAVE_LUTS 1
+#include "smaa_port.glsl"
+#define discard return vec2(0.0)
+#include "SMAA.hlsl"
+void main() {
+  ivec2 p = ivec2(gl_GlobalInvocationID.xy) + ivec2(eye.z, 0);
+  if (p.x >= eye.w || p.y >= eye.y) return;
+  int x0 = eye_of(p.x) * eye.x; g_lo = ivec2(x0, 0); g_hi = ivec2(x0 + eye.x - 1, eye.y - 1);
+  vec4 w = vec4(0.0);
+  if (dot(texelFetch(t_edges, p, 0).rg, vec2(1.0)) > 0.0) {
+    vec2 tc = (vec2(p) + 0.5) * rt.xy, pc; vec4 off[3];
+    SMAABlendingWeightCalculationVS(tc, pc, off);
+    w = SMAABlendingWeightCalculationPS(tc, pc, off, 0, 0, 0, vec4(0.0));
+  }
+  imageStore(o_blend, p, w);
+}

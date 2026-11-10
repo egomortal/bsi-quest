@@ -1,0 +1,1 @@
+skip the startup movies (lab job; removed again at the end of the job)

@@ -1,0 +1,24 @@
+# Everything derived from the game stays on your PC.
+work/
+gen/
+gen_*/
+obj*/
+objs*/
+*.o
+*.a
+*.so
+*.apk
+*.exe
+*.dll
+*.tsv
+*.tfc
+*.xxx
+*.bnk
+*.pck
+*.pem
+*.jks
+*.keystore
+sdk/
+BioShock*/
+__pycache__/
+*.log

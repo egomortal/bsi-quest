@@ -1,0 +1,6 @@
+# chat 4 preset probe: shadows + AO at the Medium bucket, FXAA + light shafts kept
+[SystemSettings] EnableFXAA=True
+[SystemSettings] EnableLightShafts=True
+[SystemSettings] GraphicsQualityLevel=3
+[SystemSettings] DynamicShadowsLevel=3
+[SystemSettings] AmbientOcclusionLevel=2

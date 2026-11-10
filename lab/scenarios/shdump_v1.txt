@@ -1,0 +1,38 @@
+# Chat 4 (GPU savings): shader dump run. env.txt has BSI_B1_SHDUMP=/sdcard/BSI/shdump: every shader the game creates is
+# written there as <key>.dxbc at creation. Menu flow = measure_spot_vr_v2; then 60 s static + a 60 s sweep so more materials load; quit.
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+press A
+wait 8
+press B 200
+wait 8
+press A
+wait 8
+press A
+wait 8
+press A
+on_timeout continue
+wait_map_not XEntry_P 180
+on_timeout quit
+mark loaded
+wait 10
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+head static 0 0
+wait 60
+mark m_yaw000
+head sweep 35 8 6
+wait 60
+mark end
+quit

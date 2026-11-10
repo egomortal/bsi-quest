@@ -1,0 +1,12 @@
+{
+  "adb": "C:\\Program Files\\SideQuest\\resources\\platform-tools\\adb.exe",
+  "connect": "192.168.x.x:5555",
+  "python": "python",
+  "ndk": "C:\\android-ndk-r27c",
+  "build_jobs": 6,
+  "allow_install": true,
+  "allow_build": true,
+  "kill_foreign_adb": false,
+  "max_battery_temp_c": 50,
+  "keep_awake_idle_min": 480
+}

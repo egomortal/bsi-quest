@@ -1,0 +1,72 @@
+diff --git a/src/freedreno/vulkan/tu_knl_kgsl.cc b/src/freedreno/vulkan/tu_knl_kgsl.cc
+index bec3720..9f80840 100644
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -826,6 +826,21 @@ get_relative_ms(uint64_t abs_timeout_ns)
+    return abs_timeout_ms - cur_time_ms;
+ }
+ 
++/* Whether the context has retired timestamp, without waiting. */
++static bool
++kgsl_timestamp_retired(int fd, unsigned int context_id, unsigned int timestamp)
++{
++   struct kgsl_cmdstream_readtimestamp_ctxtid req = {
++      .context_id = context_id,
++      .type = KGSL_TIMESTAMP_RETIRED,
++   };
++
++   if (safe_ioctl(fd, IOCTL_KGSL_CMDSTREAM_READTIMESTAMP_CTXTID, &req))
++      return false;
++
++   return timestamp_cmp(req.timestamp, timestamp);
++}
++
+ /* safe_ioctl is not enough as restarted waits would not adjust the timeout
+  * which could lead to waiting substantially longer than requested
+  */
+@@ -835,6 +850,14 @@ wait_timestamp_safe(int fd,
+                     unsigned int timestamp,
+                     uint64_t abs_timeout_ns)
+ {
++   /* KGSL treats a zero timeout as "wait forever", so a poll (a timeout that
++    * is zero or already past) must not reach the wait ioctl: it would block
++    * until the GPU finishes, and callers such as the timeline-semaphore GC
++    * poll while holding a lock on every submit. Read the retired timestamp.
++    */
++   if (get_relative_ms(abs_timeout_ns) == 0)
++      return kgsl_timestamp_retired(fd, context_id, timestamp) ? VK_SUCCESS : VK_TIMEOUT;
++
+    struct kgsl_device_waittimestamp_ctxtid wait = {
+       .context_id = context_id,
+       .timestamp = timestamp,
+@@ -1138,9 +1161,13 @@ kgsl_syncobj_merge(const struct kgsl_syncobj **syncobjs, uint32_t count)
+             if (ret.queue == sync->queue) {
+                ret.timestamp = max_ts(ret.timestamp, sync->timestamp);
+             } else {
+-               ret.state = KGSL_SYNCOBJ_STATE_FD;
++               /* Two queues: both timestamps become fences before they can be
++                * merged; ret's own fd is not valid while it is a timestamp.
++                */
++               int ret_fd = kgsl_syncobj_ts_to_fd(&ret);
+                int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+-               ret.fd = sync_merge_close("tu_sync", ret.fd, sync_fd, true);
++               ret.state = KGSL_SYNCOBJ_STATE_FD;
++               ret.fd = sync_merge_close("tu_sync", ret_fd, sync_fd, true);
+                assert(ret.fd >= 0);
+             }
+          } else if (ret.state == KGSL_SYNCOBJ_STATE_FD) {
+@@ -1157,9 +1184,12 @@ kgsl_syncobj_merge(const struct kgsl_syncobj **syncobjs, uint32_t count)
+             ret.fd = sync_merge_close("tu_sync", ret.fd, sync->fd, false);
+             assert(ret.fd >= 0);
+          } else if (ret.state == KGSL_SYNCOBJ_STATE_TS) {
++            /* It is ret, the timestamp, that turns into a fence here: sync is
++             * already an fd (converting it read a queue it does not have).
++             */
++            int ret_fd = kgsl_syncobj_ts_to_fd(&ret);
+             ret.state = KGSL_SYNCOBJ_STATE_FD;
+-            int sync_fd = kgsl_syncobj_ts_to_fd(sync);
+-            ret.fd = sync_merge_close("tu_sync", ret.fd, sync_fd, true);
++            ret.fd = sync_merge_close("tu_sync", ret_fd, sync->fd, false);
+             assert(ret.fd >= 0);
+          } else {
+             ret = *sync;

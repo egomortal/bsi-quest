@@ -1,0 +1,375 @@
+From efe0a70ab56785183b5f2464aa130354fbe7edea Mon Sep 17 00:00:00 2001
+From: bsi <bsi@local>
+Date: Mon, 5 Oct 2026 16:39:24 -0400
+Subject: [PATCH 4/4] BSI: zero-copy D3D11 Map (guest-window placed /
+ host-pointer mappings)
+
+Local patch recomp/patches/dxvk-bsi-zero-copy.patch (== /tmp/claude-0/dxvk_worktree_1004.patch). Never upstream.
+---
+ src/dxvk/dxvk_device_info.cpp |   9 ++
+ src/dxvk/dxvk_device_info.h   |   6 ++
+ src/dxvk/dxvk_memory.cpp      | 170 ++++++++++++++++++++++++++++++++--
+ src/dxvk/dxvk_memory.h        |  10 +-
+ 4 files changed, 187 insertions(+), 8 deletions(-)
+
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index b609bc17..cace5c66 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -31,6 +31,8 @@ namespace dxvk {
+     HANDLE_EXT(extGraphicsPipelineLibrary);        \
+     HANDLE_EXT(extHdrMetadata);                    \
+     HANDLE_EXT(extLineRasterization);              \
++    HANDLE_EXT(extExternalMemoryHost);             \
++    HANDLE_EXT(extMapMemoryPlaced);                \
+     HANDLE_EXT(extMemoryBudget);                   \
+     HANDLE_EXT(extMemoryPriority);                 \
+     HANDLE_EXT(extMultiDraw);                      \
+@@ -57,6 +59,7 @@ namespace dxvk {
+     HANDLE_EXT(khrMaintenance9);                   \
+     HANDLE_EXT(khrMaintenance10);                  \
+     HANDLE_EXT(khrMaintenance11);                  \
++    HANDLE_EXT(khrMapMemory2);                     \
+     HANDLE_EXT(khrPipelineLibrary);                \
+     HANDLE_EXT(khrPresentId);                      \
+     HANDLE_EXT(khrPresentId2);                     \
+@@ -978,6 +981,12 @@ namespace dxvk {
+ 
+       /* Memory budget and priority for improved memory management */
+       ENABLE_EXT(extMemoryBudget, false),
++
++      /* BSI (local patch): zero-copy guest mappings - placed memory maps (Turnip) or host-pointer import (lavapipe test path) */
++      ENABLE_EXT(extExternalMemoryHost, false),
++      ENABLE_EXT_FEATURE(extMapMemoryPlaced, memoryMapPlaced, false),
++      ENABLE_EXT_FEATURE(extMapMemoryPlaced, memoryUnmapReserve, false),
++      ENABLE_EXT(khrMapMemory2, false),
+       ENABLE_EXT_FEATURE(extMemoryPriority, memoryPriority, false),
+ 
+       /* Optionally used to batch consecutive draws */
+diff --git a/src/dxvk/dxvk_device_info.h b/src/dxvk/dxvk_device_info.h
+index 54deab3e..c6423d07 100644
+--- a/src/dxvk/dxvk_device_info.h
++++ b/src/dxvk/dxvk_device_info.h
+@@ -74,6 +74,8 @@ namespace dxvk {
+     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT        extGraphicsPipelineLibrary      = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT };
+     VkBool32                                                  extHdrMetadata                  = VK_FALSE;
+     VkPhysicalDeviceLineRasterizationFeaturesEXT              extLineRasterization            = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT };
++    VkBool32                                                  extExternalMemoryHost           = VK_FALSE;   /* BSI zero-copy (local patch) */
++    VkPhysicalDeviceMapMemoryPlacedFeaturesEXT                extMapMemoryPlaced              = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT };   /* BSI */
+     VkBool32                                                  extMemoryBudget                 = VK_FALSE;
+     VkPhysicalDeviceMemoryPriorityFeaturesEXT                 extMemoryPriority               = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT };
+     VkPhysicalDeviceMultiDrawFeaturesEXT                      extMultiDraw                    = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT };
+@@ -100,6 +102,7 @@ namespace dxvk {
+     VkPhysicalDeviceMaintenance9FeaturesKHR                   khrMaintenance9                 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_9_FEATURES_KHR };
+     VkPhysicalDeviceMaintenance10FeaturesKHR                  khrMaintenance10                = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_10_FEATURES_KHR };
+     VkPhysicalDeviceMaintenance11FeaturesKHR                  khrMaintenance11                = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_11_FEATURES_KHR };
++    VkBool32                                                  khrMapMemory2                   = VK_FALSE;   /* BSI */
+     VkBool32                                                  khrPipelineLibrary              = VK_FALSE;
+     VkPhysicalDevicePresentIdFeaturesKHR                      khrPresentId                    = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR };
+     VkPhysicalDevicePresentId2FeaturesKHR                     khrPresentId2                   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR };
+@@ -150,6 +153,8 @@ namespace dxvk {
+     VkExtensionProperties extGraphicsPipelineLibrary        = vk::makeExtension(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+     VkExtensionProperties extHdrMetadata                    = vk::makeExtension(VK_EXT_HDR_METADATA_EXTENSION_NAME);
+     VkExtensionProperties extLineRasterization              = vk::makeExtension(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
++    VkExtensionProperties extExternalMemoryHost             = vk::makeExtension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);   /* BSI */
++    VkExtensionProperties extMapMemoryPlaced                = vk::makeExtension(VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME);      /* BSI */
+     VkExtensionProperties extMemoryBudget                   = vk::makeExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+     VkExtensionProperties extMemoryPriority                 = vk::makeExtension(VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
+     VkExtensionProperties extMultiDraw                      = vk::makeExtension(VK_EXT_MULTI_DRAW_EXTENSION_NAME);
+@@ -176,6 +181,7 @@ namespace dxvk {
+     VkExtensionProperties khrMaintenance9                   = vk::makeExtension(VK_KHR_MAINTENANCE_9_EXTENSION_NAME);
+     VkExtensionProperties khrMaintenance10                  = vk::makeExtension(VK_KHR_MAINTENANCE_10_EXTENSION_NAME);
+     VkExtensionProperties khrMaintenance11                  = vk::makeExtension(VK_KHR_MAINTENANCE_11_EXTENSION_NAME);
++    VkExtensionProperties khrMapMemory2                     = vk::makeExtension(VK_KHR_MAP_MEMORY_2_EXTENSION_NAME);           /* BSI */
+     VkExtensionProperties khrPipelineLibrary                = vk::makeExtension(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
+     VkExtensionProperties khrPresentId                      = vk::makeExtension(VK_KHR_PRESENT_ID_EXTENSION_NAME);
+     VkExtensionProperties khrPresentId2                     = vk::makeExtension(VK_KHR_PRESENT_ID_2_EXTENSION_NAME);
+diff --git a/src/dxvk/dxvk_memory.cpp b/src/dxvk/dxvk_memory.cpp
+index fc18044d..51749c7c 100644
+--- a/src/dxvk/dxvk_memory.cpp
++++ b/src/dxvk/dxvk_memory.cpp
+@@ -1,4 +1,6 @@
+ #include <algorithm>
++#include <cstdlib>
++#include <cstring>
+ #include <iomanip>
+ #include <sstream>
+ 
+@@ -10,6 +12,34 @@
+ 
+ namespace dxvk {
+ 
++  /* BSI (local patch, never upstream): zero-copy mapped memory for the BioShock Infinite static recompilation.
++     The host runtime publishes BSI_GVA_HOOK="<alloc>,<free>" (hex host function pointers) before the device is
++     created. Host-visible memory that DXVK maps persistently is then placed inside the 32-bit guest's 4 GB address
++     window, so a guest Map() can return (mapPtr - guest base) and the game writes GPU-visible memory directly:
++       mode 1: VK_EXT_map_memory_placed (vkMapMemory2KHR at an address the runtime reserved; Turnip has it)
++       mode 2: VK_EXT_external_memory_host (import guest-window pages; lavapipe test path, chunk allocations only)
++     alloc(size, align) returns a 64 KB aligned host pointer inside the window or null (then DXVK maps normally);
++     free(ptr, size) gives the range back once the memory is unmapped/freed (mode 1 leaves a PROT_NONE reservation). */
++  namespace bsi {
++    typedef void* (*PFN_alloc)(size_t, size_t);
++    typedef void  (*PFN_free)(void*, size_t);
++    struct Hook { PFN_alloc alloc = nullptr; PFN_free free = nullptr; };
++    static const Hook& hook() {
++      static const Hook h = [] {
++        Hook r; const char* e = std::getenv("BSI_GVA_HOOK");
++        if (e) {
++          char* end = nullptr; unsigned long long a = std::strtoull(e, &end, 16);
++          if (end && *end == ',') {
++            unsigned long long f = std::strtoull(end + 1, nullptr, 16);
++            if (a && f) { r.alloc = reinterpret_cast<PFN_alloc>(uintptr_t(a)); r.free = reinterpret_cast<PFN_free>(uintptr_t(f)); }
++          }
++        }
++        return r; }();
++      return h;
++    }
++    constexpr VkDeviceSize Align = 64u << 10;
++  }
++
+   void DxvkMemoryChunk::addAllocation(DxvkResourceAllocation* allocation) {
+     allocation->m_nextInChunk = allocationList;
+ 
+@@ -888,7 +918,8 @@ namespace dxvk {
+       }
+ 
+       if (size * minResourcesPerChunk > maxChunkSize) {
+-        DxvkDeviceMemory memory = allocateDeviceMemory(type, requirements.size, nullptr);
++        DxvkDeviceMemory memory = allocateDeviceMemory(type, requirements.size, nullptr,
++          (allocationInfo.properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0u);
+ 
+         if (!memory.memory)
+           continue;
+@@ -1334,10 +1365,31 @@ namespace dxvk {
+   }
+ 
+ 
++  uint32_t DxvkMemoryAllocator::bsiMode() {
++    static int32_t mode = -1;
++    if (mode < 0) {
++      const auto& f = m_device->features();
++      const char* force = std::getenv("BSI_ZC_MODE");   /* "host" forces the import path where both exist */
++      mode = 0;
++      if (bsi::hook().alloc) {
++        if (f.extMapMemoryPlaced.memoryMapPlaced && f.extMapMemoryPlaced.memoryUnmapReserve
++         && (!force || std::strcmp(force, "host")))
++          mode = 1;
++        else if (f.extExternalMemoryHost)
++          mode = 2;
++      }
++      Logger::info(str::format("BSI zero-copy guest mappings: ", mode == 1 ? "placed (VK_EXT_map_memory_placed)"
++        : mode == 2 ? "host-pointer import (VK_EXT_external_memory_host)" : "off"));
++    }
++    return uint32_t(mode);
++  }
++
++
+   DxvkDeviceMemory DxvkMemoryAllocator::allocateDeviceMemory(
+           DxvkMemoryType&       type,
+           VkDeviceSize          size,
+-    const void*                 next) {
++    const void*                 next,
++          bool                  bsiMapped) {
+     auto vk = m_device->vkd();
+ 
+     // If global buffers are enabled for this allocation, pad the allocation size
+@@ -1394,11 +1446,44 @@ namespace dxvk {
+     DxvkDeviceMemory result = { };
+     result.size = size;
+ 
++    /* BSI mode 2: back host-visible chunks with imported guest-window pages */
++    VkImportMemoryHostPointerInfoEXT bsiImport = { VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT };
++    void* bsiPtr = nullptr;
++
++    if (bsiMapped && !next && (type.properties.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
++     && (size % bsi::Align) == 0u && bsiMode() == 2u) {
++      bsiPtr = bsi::hook().alloc(size_t(size), size_t(bsi::Align));
++
++      if (bsiPtr) {
++        static auto pfnProps = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vk->sym("vkGetMemoryHostPointerPropertiesEXT"));
++        VkMemoryHostPointerPropertiesEXT props = { VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT };
++
++        if (pfnProps && !pfnProps(vk->device(), VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, bsiPtr, &props)
++         && (props.memoryTypeBits & (1u << type.index))) {
++          bsiImport.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++          bsiImport.pHostPointer = bsiPtr;
++          bsiImport.pNext = std::exchange(memoryInfo.pNext, &bsiImport);
++        } else {
++          bsi::hook().free(bsiPtr, size_t(size));
++          bsiPtr = nullptr;
++        }
++      }
++    }
++
+     if (vk->vkAllocateMemory(vk->device(), &memoryInfo, nullptr, &result.memory)) {
+       freeEmptyChunksInHeap(*type.heap, VkDeviceSize(-1), high_resolution_clock::time_point());
+ 
+-      if (vk->vkAllocateMemory(vk->device(), &memoryInfo, nullptr, &result.memory))
++      if (vk->vkAllocateMemory(vk->device(), &memoryInfo, nullptr, &result.memory)) {
++        if (bsiPtr)
++          bsi::hook().free(bsiPtr, size_t(size));
+         return DxvkDeviceMemory();
++      }
++    }
++
++    if (bsiPtr) {
++      result.mapPtr = bsiPtr;
++      result.bsiPtr = bsiPtr;
++      result.bsiMode = 2u;
+     }
+ 
+     // Technically redundant if EXT_memory_priority is also supported, but this shouldn't hurt
+@@ -1508,7 +1593,8 @@ namespace dxvk {
+     DxvkDeviceMemory chunk = { };
+ 
+     while (!chunk.memory && desiredSize >= std::max(requiredSize, DxvkMemoryPool::MinChunkSize)) {
+-      chunk = allocateDeviceMemory(type, desiredSize, nullptr);
++      chunk = allocateDeviceMemory(type, desiredSize, nullptr,
++        (properties & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0u);
+       desiredSize /= 2u;
+     }
+ 
+@@ -1626,8 +1712,16 @@ namespace dxvk {
+           DxvkDeviceMemory      memory) {
+     auto vk = m_device->vkd();
+     vk->vkDestroyBuffer(vk->device(), memory.buffer, nullptr);
++
++    /* BSI mode 1: unmap into a reservation first, so freeing the memory leaves no hole in the guest window */
++    if (memory.bsiMode == 1u && memory.mapPtr)
++      bsiUnmapPlaced(memory);
++
+     vk->vkFreeMemory(vk->device(), memory.memory, nullptr);
+ 
++    if (memory.bsiPtr)
++      bsi::hook().free(memory.bsiPtr, size_t(memory.size));
++
+     type.stats.memoryAllocated -= memory.size;
+   }
+ 
+@@ -1823,6 +1917,21 @@ namespace dxvk {
+   }
+ 
+ 
++  void DxvkMemoryAllocator::bsiUnmapPlaced(
++          DxvkDeviceMemory&     memory) {
++    auto vk = m_device->vkd();
++    static auto pfnUnmap2 = [&vk] {
++      auto p = reinterpret_cast<PFN_vkUnmapMemory2KHR>(vk->sym("vkUnmapMemory2KHR"));
++      return p ? p : reinterpret_cast<PFN_vkUnmapMemory2KHR>(vk->sym("vkUnmapMemory2")); }();
++    VkMemoryUnmapInfoKHR info = { VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR };
++    info.flags = VK_MEMORY_UNMAP_RESERVE_BIT_EXT;
++    info.memory = memory.memory;
++    if (!pfnUnmap2 || pfnUnmap2(vk->device(), &info) != VK_SUCCESS)
++      Logger::err("BSI: placed unmap with reserve failed");
++    memory.mapPtr = nullptr;
++  }
++
++
+   void DxvkMemoryAllocator::mapDeviceMemory(
+           DxvkDeviceMemory&     memory,
+           VkMemoryPropertyFlags properties) {
+@@ -1832,8 +1941,42 @@ namespace dxvk {
+ 
+       auto vk = m_device->vkd();
+ 
+-      VkResult vr = vk->vkMapMemory(vk->device(),
+-        memory.memory, 0, memory.size, 0, &memory.mapPtr);
++      VkResult vr = VK_ERROR_MEMORY_MAP_FAILED;
++
++      /* BSI mode 1: map at an address the runtime reserved inside the guest window */
++      if (!memory.bsiPtr && (memory.size % bsi::Align) == 0u && bsiMode() == 1u) {
++        void* addr = bsi::hook().alloc(size_t(memory.size), size_t(bsi::Align));
++
++        if (addr) {
++          static auto pfnMap2 = [&vk] {
++            auto p = reinterpret_cast<PFN_vkMapMemory2KHR>(vk->sym("vkMapMemory2KHR"));
++            return p ? p : reinterpret_cast<PFN_vkMapMemory2KHR>(vk->sym("vkMapMemory2")); }();
++          VkMemoryMapPlacedInfoEXT placed = { VK_STRUCTURE_TYPE_MEMORY_MAP_PLACED_INFO_EXT };
++          placed.pPlacedAddress = addr;
++          VkMemoryMapInfoKHR info = { VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR, &placed };
++          info.flags = VK_MEMORY_MAP_PLACED_BIT_EXT;
++          info.memory = memory.memory;
++          info.offset = 0;
++          info.size = VK_WHOLE_SIZE;
++
++          if (pfnMap2 && pfnMap2(vk->device(), &info, &memory.mapPtr) == VK_SUCCESS && memory.mapPtr == addr) {
++            memory.bsiPtr = addr;
++            memory.bsiMode = 1u;
++            vr = VK_SUCCESS;
++          } else {
++            static uint32_t warned = 0;
++            if (warned++ < 4u)
++              Logger::warn(str::format("BSI: placed map of ", memory.size, " bytes failed, mapping normally"));
++            memory.mapPtr = nullptr;
++            bsi::hook().free(addr, size_t(memory.size));
++          }
++        }
++      }
++
++      if (vr != VK_SUCCESS) {
++        vr = vk->vkMapMemory(vk->device(),
++          memory.memory, 0, memory.size, 0, &memory.mapPtr);
++      }
+ 
+       if (vr != VK_SUCCESS) {
+         throw DxvkError(str::format("Failed to map Vulkan memory: ", vr,
+@@ -1851,7 +1994,20 @@ namespace dxvk {
+         return;
+ 
+       auto vk = m_device->vkd();
+-      vk->vkUnmapMemory(vk->device(), memory.memory);
++
++      if (memory.bsiMode == 2u)
++        return;   /* imported host pages stay accessible; mapPtr is the import address */
++
++      if (memory.bsiMode == 1u) {
++        void* p = memory.mapPtr;
++        bsiUnmapPlaced(memory);
++        bsi::hook().free(memory.bsiPtr, size_t(memory.size));
++        memory.bsiPtr = nullptr;
++        memory.bsiMode = 0u;
++        memory.mapPtr = p;   /* logged below, cleared after */
++      } else {
++        vk->vkUnmapMemory(vk->device(), memory.memory);
++      }
+ 
+       Logger::debug(str::format("Unmapped memory region 0x", std::hex,
+         reinterpret_cast<uintptr_t>(memory.mapPtr), " - 0x",
+diff --git a/src/dxvk/dxvk_memory.h b/src/dxvk/dxvk_memory.h
+index a8e4486f..7b0e3278 100644
+--- a/src/dxvk/dxvk_memory.h
++++ b/src/dxvk/dxvk_memory.h
+@@ -69,6 +69,8 @@ namespace dxvk {
+     void*                 mapPtr  = nullptr;
+     VkDeviceAddress       gpuVa   = 0u;
+     uint64_t              cookie  = 0u;
++    void*                 bsiPtr  = nullptr;  /* BSI (local patch): guest-window range backing this memory */
++    uint32_t              bsiMode = 0u;       /* 0 none, 1 placed map, 2 imported host pointer */
+   };
+ 
+ 
+@@ -1403,7 +1405,10 @@ namespace dxvk {
+     DxvkDeviceMemory allocateDeviceMemory(
+             DxvkMemoryType&       type,
+             VkDeviceSize          size,
+-      const void*                 next);
++      const void*                 next,
++            bool                  bsiMapped = false);
++
++    uint32_t bsiMode();
+ 
+     void assignMemoryDebugName(
+       const DxvkDeviceMemory&     memory,
+@@ -1455,6 +1460,9 @@ namespace dxvk {
+             DxvkDeviceMemory&     memory,
+             VkMemoryPropertyFlags properties);
+ 
++    void bsiUnmapPlaced(
++            DxvkDeviceMemory&     memory);
++
+     DxvkResourceAllocation* createAllocation(
+             DxvkMemoryType&       type,
+             DxvkMemoryPool&       pool,
+-- 
+2.43.0
+

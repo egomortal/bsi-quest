@@ -1,0 +1,79 @@
+# Chat 4 fork19 (2 Nov): stutter audit walk. Menu flow = g4_spot_short_v1. After load: 30 s static settle, then ~4 min of
+# walking forward with turns (left stick forward, right stick turns), head static (body turns move the view). Saves restored by the job.
+
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+press A
+wait 8
+press B 200
+wait 8
+press A
+wait 8
+press A
+wait 8
+press A
+on_timeout continue
+wait_map_not XEntry_P 180
+on_timeout quit
+mark loaded
+wait 10
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+head static 0 0
+wait 30
+mark w_start
+mark w_loop0
+stick 0 1 0 0 8
+stick 0 0 0.6 0 2
+stick 0 1 0 0 8
+stick 0 0 -0.6 0 3
+stick 0 1 0 0 10
+stick 0 0 0.6 0 4
+stick -0.7 0.7 0 0 6
+stick 0 1 0 0 8
+stick 0 0 0.6 0 3
+stick 0 1 0 0 8
+stick 0.7 0.7 0 0 6
+stick 0 0 -0.6 0 4
+mark w_loop1
+stick 0 1 0 0 8
+stick 0 0 0.6 0 2
+stick 0 1 0 0 8
+stick 0 0 -0.6 0 3
+stick 0 1 0 0 10
+stick 0 0 0.6 0 4
+stick -0.7 0.7 0 0 6
+stick 0 1 0 0 8
+stick 0 0 0.6 0 3
+stick 0 1 0 0 8
+stick 0.7 0.7 0 0 6
+stick 0 0 -0.6 0 4
+mark w_loop2
+stick 0 1 0 0 8
+stick 0 0 0.6 0 2
+stick 0 1 0 0 8
+stick 0 0 -0.6 0 3
+stick 0 1 0 0 10
+stick 0 0 0.6 0 4
+stick -0.7 0.7 0 0 6
+stick 0 1 0 0 8
+stick 0 0 0.6 0 3
+stick 0 1 0 0 8
+stick 0.7 0.7 0 0 6
+stick 0 0 -0.6 0 4
+stick 0 0 0 0 1
+mark w_end
+wait 20
+mark end
+quit

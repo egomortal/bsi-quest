@@ -1,0 +1,29 @@
+# BSI-Quest lab, chat 3: Continue probe (which save does Continue load?), then quit. Continue loads the checkpoint the job picked
+# with save_spot. Menu flow = title_continue_ab_v4 (j0008). Phases are 90 s = 2-3 full [b1gp]/[b1perf] windows of 600 presents.
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+mark press_any_key
+press A
+wait 8
+mark login_failed
+# B = Proceed Without Login (A here would exit the game)
+press B 200
+wait 8
+mark sign_in
+press A
+wait 8
+mark main_menu
+press A
+wait 8
+mark main_game_sign
+# Continue (first entry)
+press A
+on_timeout continue
+wait_map_not XEntry_P 180
+on_timeout quit
+mark loaded
+wait 20
+mark end
+quit

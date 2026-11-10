@@ -1,0 +1,37 @@
+# BSI-Quest lab scenario v1 (build 78): title -> Continue -> steady view, head sweep, shadow_eye A/B -> quit
+# Pushed by the lab runner as /sdcard/BSI/autopilot.txt (one-shot: the game renames it to autopilot_last.txt).
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+# "PRESS ANY KEY": tap A every 6 s until the front end starts the save list (log line from local_profile.c)
+press_until A 6 240 saved-game populate task
+wait 6
+mark main_menu
+press A
+wait 3
+# Main Game sign: Continue is the first entry when saves exist
+press A
+wait_map_not XEntry_P 180
+mark loading
+wait_map Master_P 300
+wait 45
+mark static_default
+wait 60
+mark sweep_default
+head sweep 35 8 6
+wait 60
+head static
+mark ab1_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab2_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark ab3_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab4_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark end
+quit

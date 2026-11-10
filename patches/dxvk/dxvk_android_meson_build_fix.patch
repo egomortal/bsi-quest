@@ -1,0 +1,12 @@
+diff --git a/src/wsi/meson.build b/src/wsi/meson.build
+--- a/src/wsi/meson.build
++++ b/src/wsi/meson.build
+@@ -22,9 +22,6 @@ if platform == 'windows'
+   wsi_deps += [ lib_setupapi ]
+ else
+-  if host_machine.system() == 'android'
+-    wsi_deps += [ cpp.find_library('android') ]
+-  endif
+   wsi_deps += [
+     lib_sdl3.partial_dependency(compile_args: true, includes: true),
+     lib_sdl2.partial_dependency(compile_args: true, includes: true),

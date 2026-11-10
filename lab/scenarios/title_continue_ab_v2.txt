@@ -1,0 +1,41 @@
+# BSI-Quest lab scenario v2 (build 78): v1 + longer menu pauses and one retry press
+# v1 (j0004, 19 Oct): title press OK, saves loaded, but the 2 menu presses at +6 s / +9 s did not start a load (180 s timeout).
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+press_until A 6 240 saved-game populate task
+wait 12
+mark main_menu
+press A
+wait 6
+mark main_game_sign
+press A
+on_timeout continue
+wait_map_not XEntry_P 60
+mark retry_press
+press A
+on_timeout quit
+wait_map_not XEntry_P 180
+mark loading
+wait_map Master_P 300
+wait 45
+mark static_default
+wait 60
+mark sweep_default
+head sweep 35 8 6
+wait 60
+head static
+mark ab1_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab2_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark ab3_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab4_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark end
+quit

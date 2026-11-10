@@ -1,0 +1,40 @@
+# Chat 4 (GPU savings): short spot run with the per-pass table on ([b1gq] pass=1 all run). Menu flow = measure_spot_vr_v2.
+# 100 s static at yaw 0 and 100 s at yaw -90 (the Fair's worst direction) = 2 full 600-present windows each at ~20 fps. ~6 min.
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+press A
+wait 8
+press B 200
+wait 8
+press A
+wait 8
+press A
+wait 8
+press A
+on_timeout continue
+wait_map_not XEntry_P 180
+on_timeout quit
+mark loaded
+wait 10
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+head static 0 0
+wait 35
+mark m_yaw000
+wait 100
+head static -90 0
+mark m_yaw270
+wait 100
+mark end
+quit

@@ -1,0 +1,5 @@
+# BSI-Quest b76 (2026-10-19): the Quest XEngine.ini had EnableFXAA / EnableLightShafts off and preset 4.
+# Written into XEngine.ini [SystemSettings] at every launch, before the game reads it.
+[SystemSettings] EnableFXAA=True
+[SystemSettings] EnableLightShafts=True
+[SystemSettings] GraphicsQualityLevel=3

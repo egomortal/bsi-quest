@@ -1,0 +1,13 @@
+# BSI-Quest chat 4 (26 Oct): FULL Ultra override (the b76 file only set GraphicsQualityLevel; the per-category level keys are what the game applies).
+# PROBE (chat 4, 2 Nov): sizing only, changes the picture.
+[SystemSettings] EnableFXAA=True
+[SystemSettings] EnableLightShafts=True
+[SystemSettings] GraphicsQualityLevel=5
+[SystemSettings] DynamicShadowsLevel=5
+[SystemSettings] AmbientOcclusionLevel=4
+[SystemSettings] MaxShadowResolution=2048
+[SystemSettings] Bloom=False
+[SystemSettings] DepthOfField=False
+[SystemSettings] EnableLightShafts=False
+[SystemSettings] LensFlares=False
+[SystemSettings] Distortion=False

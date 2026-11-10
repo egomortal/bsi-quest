@@ -1,0 +1,1213 @@
+diff --git a/src/d3d11/d3d11_context.cpp b/src/d3d11/d3d11_context.cpp
+--- a/src/d3d11/d3d11_context.cpp
++++ b/src/d3d11/d3d11_context.cpp
+@@ -1,6 +1,7 @@
+ #include <algorithm>
+ 
+ #include "d3d11_context.h"
++#include "d3d11_bsi_capture.h"
+ #include "d3d11_context_def.h"
+ #include "d3d11_context_imm.h"
+ 
+@@ -1202,12 +1203,59 @@
+     if (unlikely(HasDirtyComputeBindings()))
+       ApplyDirtyComputeBindings();
+ 
++    // BSI local patch: debug capture of the dispatch inputs (BSI_CS_CAPTURE)
++    bool capture = !IsDeferred && unlikely(BsiCsCaptureActive());
++    auto captureShader = GetCommonShader(m_state.cs.ptr());
++    auto captureName = captureShader ? captureShader->GetName() : std::string("none");
++
++    if (capture) {
++      BsiCsCapture(static_cast<ID3D11DeviceContext*>(this), captureName,
++        ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ, false);
++
++      if (unlikely(HasDirtyComputeBindings()))
++        ApplyDirtyComputeBindings();
++
++      // BSI_CS_CAPTURE_ORIG=1: also run the original code of a replaced
++      // shader on the same inputs and dump its output (on-device diff)
++      if (captureShader && captureShader->GetOriginalShader() != nullptr) {
++        BsiCsCaptureOriginal(static_cast<ID3D11DeviceContext*>(this), [&] {
++          EmitCs([
++            cOrig = captureShader->GetOriginalShader(),
++            cRepl = captureShader->GetShader(),
++            cX    = ThreadGroupCountX,
++            cY    = ThreadGroupCountY,
++            cZ    = ThreadGroupCountZ
++          ] (DxvkContext* ctx) mutable {
++            ctx->bindShader<VK_SHADER_STAGE_COMPUTE_BIT>(std::move(cOrig));
++            ctx->dispatch(cX, cY, cZ);
++            ctx->bindShader<VK_SHADER_STAGE_COMPUTE_BIT>(std::move(cRepl));
++          });
++        });
++
++        if (unlikely(HasDirtyComputeBindings()))
++          ApplyDirtyComputeBindings();
++      }
++    }
++
++    // BSI local patch: replacement compute shaders with smaller workgroups
++    if (auto cs = GetCommonShader(m_state.cs.ptr())) {
++      const auto& scale = cs->GetDispatchScale();
++      ThreadGroupCountX *= scale[0];
++      ThreadGroupCountY *= scale[1];
++      ThreadGroupCountZ *= scale[2];
++    }
++
+     EmitCs([=] (DxvkContext* ctx) {
+       ctx->dispatch(
+         ThreadGroupCountX,
+         ThreadGroupCountY,
+         ThreadGroupCountZ);
+     });
++
++    if (capture) {
++      BsiCsCapture(static_cast<ID3D11DeviceContext*>(this), captureName,
++        ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ, true);
++    }
+   }
+ 
+ 
+diff --git a/src/d3d11/d3d11_shader.cpp b/src/d3d11/d3d11_shader.cpp
+--- a/src/d3d11/d3d11_shader.cpp
++++ b/src/d3d11/d3d11_shader.cpp
+@@ -273,6 +273,28 @@
+       m_shader = pDevice->GetDXVKDevice()->createCachedShader(
+         ShaderKey.toString(), ModuleInfo, std::move(converter));
+     }
++
++    // BSI local patch: a compute replacement may use smaller workgroups
++    // and ask for more groups per Dispatch. Only trust it if its interface
++    // matches, otherwise getCode() keeps the original shader.
++    if (ShaderKey.stage() == VK_SHADER_STAGE_COMPUTE_BIT && DxvkShaderReplacer::has(ShaderKey.toString())) {
++      auto irShader = dynamic_cast<DxvkIrShader*>(m_shader.ptr());
++      auto repl = irShader ? irShader->getValidReplacement() : nullptr;
++
++      if (repl) {
++        m_dispatchScale = repl->dispatchScale;
++
++        // Verification twin with the original code (BSI_CS_CAPTURE_ORIG=1)
++        if (env::getEnvVar("BSI_CS_CAPTURE_ORIG") == "1" && !env::getEnvVar("BSI_CS_CAPTURE").empty()) {
++          Rc<D3D11ShaderConverter> converter = new D3D11ShaderConverter(ShaderKey,
++            ModuleInfo, pShaderBytecode, BytecodeLength, bool(m_buffer));
++          Rc<DxvkIrShader> orig = new DxvkIrShader(ModuleInfo, std::move(converter));
++          orig->disableReplacement();
++          m_shaderOrig = orig;
++          Logger::info(str::format("BSI_CS_CAPTURE_ORIG: original twin for ", ShaderKey.toString()));
++        }
++      }
++    }
+   }
+ 
+ 
+diff --git a/src/d3d11/d3d11_shader.h b/src/d3d11/d3d11_shader.h
+--- a/src/d3d11/d3d11_shader.h
++++ b/src/d3d11/d3d11_shader.h
+@@ -170,6 +170,27 @@
+       return m_bindings;
+     }
+ 
++    /**
++     * \brief Dispatch group count multiplier (BSI local patch)
++     *
++     * Not 1 only when a replacement shader with smaller
++     * workgroups is active for this compute shader.
++     */
++    const std::array<uint32_t, 3>& GetDispatchScale() const {
++      return m_dispatchScale;
++    }
++
++    /**
++     * \brief Original code of a replaced compute shader (BSI local patch)
++     *
++     * Only with BSI_CS_CAPTURE_ORIG=1 and an active replacement, otherwise
++     * \c nullptr. Used to run the original next to the replacement on the
++     * same inputs during a BSI_CS_CAPTURE session (on-device output diff).
++     */
++    Rc<DxvkShader> GetOriginalShader() const {
++      return m_shaderOrig;
++    }
++
+     D3D11InstanceData GetClassInstanceData(
+             uint32_t                Slot,
+             D3D11ClassInstance*     pClassInstance) const {
+@@ -182,6 +203,8 @@
+     Rc<DxvkBuffer> m_buffer;
+ 
+     D3D11BindingMask    m_bindings = { };
++    std::array<uint32_t, 3> m_dispatchScale = {{ 1u, 1u, 1u }};
++    Rc<DxvkShader>          m_shaderOrig;
+     D3D11InterfaceInfo  m_interfaces = { };
+ 
+     void CreateIrShader(
+diff --git a/src/d3d11/meson.build b/src/d3d11/meson.build
+--- a/src/d3d11/meson.build
++++ b/src/d3d11/meson.build
+@@ -28,6 +28,7 @@
+   'd3d11_class_linkage.cpp',
+   'd3d11_cmdlist.cpp',
+   'd3d11_context.cpp',
++  'd3d11_bsi_capture.cpp',
+   'd3d11_context_def.cpp',
+   'd3d11_context_ext.cpp',
+   'd3d11_context_imm.cpp',
+diff --git a/src/d3d11/d3d11_bsi_capture.cpp b/src/d3d11/d3d11_bsi_capture.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/d3d11/d3d11_bsi_capture.cpp
+@@ -0,0 +1,355 @@
++// BSI local patch (never upstream): debug capture of compute dispatches.
++//
++// BSI_CS_CAPTURE=<dir>: when <dir>/go exists, the next N immediate-context
++// Dispatch calls (N = number in the go file, default 3) are captured into
++// <dir>/cap<k>/d<i>_*: shader name + group counts (info.txt), bound SRVs
++// (texture desc, view desc, mip data), constant buffers, samplers and UAVs
++// before and after the dispatch. The go file is then renamed to done<k>.
++// Used to replay a pass offline (tools: bsi hdao replay harness).
++#include <cstdio>
++#include <fstream>
++#include <string>
++#include <vector>
++#include <unistd.h>
++
++#include "d3d11_bsi_capture.h"
++#include "d3d11_shader.h"
++
++#include "../util/log/log.h"
++#include "../util/util_env.h"
++#include "../util/util_string.h"
++
++namespace dxvk {
++
++  namespace {
++
++    struct CaptureState {
++      bool        init = false;
++      std::string dir;
++      uint32_t    session = 0u;
++      uint32_t    remaining = 0u;
++      uint32_t    index = 0u;
++      std::string out;
++    };
++
++    CaptureState& state() {
++      static CaptureState s;
++      return s;
++    }
++
++    void writeFile(const std::string& path, const void* data, size_t size) {
++      std::ofstream f(path, std::ios::binary | std::ios::trunc);
++      f.write(reinterpret_cast<const char*>(data), size);
++    }
++
++    // Copies a whole resource to a staging twin and writes every subresource
++    // (mip/slice) as raw rows: file = <base>.bin, layout in <base>.txt
++    void dumpResource(ID3D11DeviceContext* ctx, ID3D11Resource* res, const std::string& base, std::ofstream& info) {
++      Com<ID3D11Device> dev;
++      ctx->GetDevice(&dev);
++
++      D3D11_RESOURCE_DIMENSION dim = D3D11_RESOURCE_DIMENSION_UNKNOWN;
++      res->GetType(&dim);
++
++      // Resource identity, so a replay can chain passes (output of one
++      // dispatch read by the next)
++      info << "  id=" << reinterpret_cast<uintptr_t>(res) << std::endl;
++
++      if (dim == D3D11_RESOURCE_DIMENSION_BUFFER) {
++        Com<ID3D11Buffer> buf;
++        res->QueryInterface(__uuidof(ID3D11Buffer), reinterpret_cast<void**>(&buf));
++
++        D3D11_BUFFER_DESC desc = { };
++        buf->GetDesc(&desc);
++        writeFile(base + ".bdesc", &desc, sizeof(desc));
++
++        D3D11_BUFFER_DESC sdesc = { };
++        sdesc.ByteWidth = desc.ByteWidth;
++        sdesc.Usage = D3D11_USAGE_STAGING;
++        sdesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++        sdesc.StructureByteStride = desc.StructureByteStride;
++
++        Com<ID3D11Buffer> staging;
++        if (FAILED(dev->CreateBuffer(&sdesc, nullptr, &staging)))
++          return;
++
++        ctx->CopyResource(staging.ptr(), res);
++
++        D3D11_MAPPED_SUBRESOURCE map = { };
++        if (SUCCEEDED(ctx->Map(staging.ptr(), 0, D3D11_MAP_READ, 0, &map))) {
++          writeFile(base + ".bin", map.pData, desc.ByteWidth);
++          ctx->Unmap(staging.ptr(), 0);
++        }
++
++        info << "  buffer bytes=" << desc.ByteWidth << " bind=" << desc.BindFlags << " misc=" << desc.MiscFlags
++             << " stride=" << desc.StructureByteStride << std::endl;
++        return;
++      }
++
++      if (dim != D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
++        info << "  (unsupported resource dimension " << uint32_t(dim) << ")" << std::endl;
++        return;
++      }
++
++      Com<ID3D11Texture2D> tex;
++      res->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&tex));
++
++      D3D11_TEXTURE2D_DESC desc = { };
++      tex->GetDesc(&desc);
++      writeFile(base + ".tdesc", &desc, sizeof(desc));
++
++      D3D11_TEXTURE2D_DESC sdesc = desc;
++      sdesc.Usage = D3D11_USAGE_STAGING;
++      sdesc.BindFlags = 0;
++      sdesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++      sdesc.MiscFlags = 0;
++
++      info << "  tex2d " << desc.Width << "x" << desc.Height << " fmt=" << uint32_t(desc.Format)
++           << " mips=" << desc.MipLevels << " array=" << desc.ArraySize << " samples=" << desc.SampleDesc.Count
++           << " bind=" << desc.BindFlags << " misc=" << desc.MiscFlags << std::endl;
++
++      if (desc.SampleDesc.Count > 1)
++        return;
++
++      Com<ID3D11Texture2D> staging;
++      if (FAILED(dev->CreateTexture2D(&sdesc, nullptr, &staging))) {
++        info << "  (staging copy failed)" << std::endl;
++        return;
++      }
++
++      ctx->CopyResource(staging.ptr(), res);
++
++      std::ofstream bin(base + ".bin", std::ios::binary | std::ios::trunc);
++      std::ofstream lay(base + ".txt", std::ios::trunc);
++
++      for (uint32_t a = 0; a < desc.ArraySize; a++) {
++        for (uint32_t m = 0; m < desc.MipLevels; m++) {
++          uint32_t sub = D3D11CalcSubresource(m, a, desc.MipLevels);
++          uint32_t h = std::max(desc.Height >> m, 1u);
++
++          D3D11_MAPPED_SUBRESOURCE map = { };
++          if (FAILED(ctx->Map(staging.ptr(), sub, D3D11_MAP_READ, 0, &map)))
++            continue;
++
++          // Block-compressed formats are not expected here; rows = height
++          lay << sub << " " << map.RowPitch << " " << h << " " << uint64_t(bin.tellp()) << std::endl;
++          bin.write(reinterpret_cast<const char*>(map.pData), size_t(map.RowPitch) * h);
++          ctx->Unmap(staging.ptr(), sub);
++        }
++      }
++    }
++
++    void captureBindings(ID3D11DeviceContext* ctx, const std::string& base, std::ofstream& info, bool post) {
++      if (!post) {
++        for (uint32_t i = 0; i < 16; i++) {
++          ID3D11ShaderResourceView* srv = nullptr;
++          ctx->CSGetShaderResources(i, 1, &srv);
++
++          if (!srv)
++            continue;
++
++          D3D11_SHADER_RESOURCE_VIEW_DESC vdesc = { };
++          srv->GetDesc(&vdesc);
++
++          std::string b = str::format(base, "_srv", i);
++          writeFile(b + ".vdesc", &vdesc, sizeof(vdesc));
++          info << "srv " << i << " viewfmt=" << uint32_t(vdesc.Format) << " viewdim=" << uint32_t(vdesc.ViewDimension) << std::endl;
++
++          Com<ID3D11Resource> res;
++          srv->GetResource(&res);
++          dumpResource(ctx, res.ptr(), b, info);
++          srv->Release();
++        }
++
++        for (uint32_t i = 0; i < 14; i++) {
++          ID3D11Buffer* cb = nullptr;
++          UINT first = 0, count = 0;
++          static_cast<ID3D11DeviceContext1*>(ctx)->CSGetConstantBuffers1(i, 1, &cb, &first, &count);
++
++          if (!cb)
++            continue;
++
++          info << "cb " << i << " first=" << first << " count=" << count << std::endl;
++          dumpResource(ctx, cb, str::format(base, "_cb", i), info);
++          cb->Release();
++        }
++
++        for (uint32_t i = 0; i < 16; i++) {
++          ID3D11SamplerState* smp = nullptr;
++          ctx->CSGetSamplers(i, 1, &smp);
++
++          if (!smp)
++            continue;
++
++          D3D11_SAMPLER_DESC sdesc = { };
++          smp->GetDesc(&sdesc);
++          writeFile(str::format(base, "_smp", i, ".sdesc"), &sdesc, sizeof(sdesc));
++          info << "sampler " << i << " filter=" << uint32_t(sdesc.Filter) << " addr=" << uint32_t(sdesc.AddressU)
++               << "," << uint32_t(sdesc.AddressV) << std::endl;
++          smp->Release();
++        }
++      }
++
++      for (uint32_t i = 0; i < 8; i++) {
++        ID3D11UnorderedAccessView* uav = nullptr;
++        ctx->CSGetUnorderedAccessViews(i, 1, &uav);
++
++        if (!uav)
++          continue;
++
++        D3D11_UNORDERED_ACCESS_VIEW_DESC vdesc = { };
++        uav->GetDesc(&vdesc);
++
++        std::string b = str::format(base, "_uav", i, post ? "_post" : "_pre");
++        writeFile(b + ".vdesc", &vdesc, sizeof(vdesc));
++        info << "uav " << i << (post ? " post" : " pre") << " viewfmt=" << uint32_t(vdesc.Format)
++             << " viewdim=" << uint32_t(vdesc.ViewDimension) << std::endl;
++
++        Com<ID3D11Resource> res;
++        uav->GetResource(&res);
++        dumpResource(ctx, res.ptr(), b, info);
++        uav->Release();
++      }
++    }
++
++  }
++
++
++  bool BsiCsCaptureActive() {
++    auto& s = state();
++
++    if (!s.init) {
++      s.dir = env::getEnvVar("BSI_CS_CAPTURE");
++      s.init = true;
++    }
++
++    if (s.dir.empty())
++      return false;
++
++    if (s.remaining)
++      return true;
++
++    std::string go = str::format(s.dir, "/go");
++
++    if (access(go.c_str(), F_OK))
++      return false;
++
++    uint32_t n = 3u;
++    { std::ifstream f(go);
++      uint32_t v = 0u;
++      if (f >> v && v)
++        n = v; }
++
++    s.session++;
++    s.remaining = n;
++    s.index = 0u;
++    s.out = str::format(s.dir, "/cap", s.session);
++
++    std::string cmd = str::format("mkdir -p '", s.out, "'");
++    if (system(cmd.c_str())) { }
++
++    std::rename(go.c_str(), str::format(s.dir, "/done", s.session).c_str());
++    Logger::info(str::format("BSI_CS_CAPTURE: capturing ", n, " dispatches to ", s.out));
++    return true;
++  }
++
++
++  void BsiCsCapture(
++          ID3D11DeviceContext*  ctx,
++    const std::string&          shaderName,
++          UINT                  x,
++          UINT                  y,
++          UINT                  z,
++          bool                  post) {
++    auto& s = state();
++
++    if (!s.remaining)
++      return;
++
++    std::string base = str::format(s.out, "/d", s.index);
++    std::ofstream info(base + "_info.txt", post ? std::ios::app : std::ios::trunc);
++
++    if (!post)
++      info << "shader " << shaderName << std::endl << "groups " << x << " " << y << " " << z << std::endl;
++
++    captureBindings(ctx, base, info, post);
++
++    if (post) {
++      s.index++;
++      s.remaining--;
++    }
++  }
++
++
++  void BsiCsCaptureOriginal(
++          ID3D11DeviceContext*   ctx,
++    const std::function<void()>& runOriginal) {
++    auto& s = state();
++
++    if (!s.remaining)
++      return;
++
++    Com<ID3D11Device> dev;
++    ctx->GetDevice(&dev);
++
++    // Save the content of every bound UAV resource
++    std::vector<std::pair<Com<ID3D11Resource>, Com<ID3D11Resource>>> saved;
++
++    for (uint32_t i = 0; i < 8; i++) {
++      ID3D11UnorderedAccessView* uav = nullptr;
++      ctx->CSGetUnorderedAccessViews(i, 1, &uav);
++
++      if (!uav)
++        continue;
++
++      Com<ID3D11Resource> res;
++      uav->GetResource(&res);
++      uav->Release();
++
++      Com<ID3D11Texture2D> tex;
++      if (FAILED(res->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&tex)))) {
++        Logger::warn("BSI_CS_CAPTURE_ORIG: non-texture UAV, original not run");
++        return;
++      }
++
++      D3D11_TEXTURE2D_DESC desc = { };
++      tex->GetDesc(&desc);
++      desc.Usage = D3D11_USAGE_DEFAULT;
++      desc.BindFlags = 0;
++      desc.CPUAccessFlags = 0;
++      desc.MiscFlags = 0;
++
++      Com<ID3D11Texture2D> copy;
++      if (FAILED(dev->CreateTexture2D(&desc, nullptr, &copy))) {
++        Logger::warn("BSI_CS_CAPTURE_ORIG: cannot create UAV copy, original not run");
++        return;
++      }
++
++      ctx->CopyResource(copy.ptr(), res.ptr());
++      saved.push_back({ res, Com<ID3D11Resource>(copy.ptr()) });
++    }
++
++    runOriginal();
++
++    std::string base = str::format(s.out, "/d", s.index);
++    std::ofstream info(base + "_info.txt", std::ios::app);
++
++    for (uint32_t i = 0; i < 8; i++) {
++      ID3D11UnorderedAccessView* uav = nullptr;
++      ctx->CSGetUnorderedAccessViews(i, 1, &uav);
++
++      if (!uav)
++        continue;
++
++      info << "uav " << i << " orig" << std::endl;
++      Com<ID3D11Resource> res;
++      uav->GetResource(&res);
++      dumpResource(ctx, res.ptr(), str::format(base, "_uav", i, "_orig"), info);
++      uav->Release();
++    }
++
++    for (auto& p : saved)
++      ctx->CopyResource(p.first.ptr(), p.second.ptr());
++  }
++
++}
+diff --git a/src/d3d11/d3d11_bsi_capture.h b/src/d3d11/d3d11_bsi_capture.h
+new file mode 100644
+--- /dev/null
++++ b/src/d3d11/d3d11_bsi_capture.h
+@@ -0,0 +1,38 @@
++#pragma once
++
++#include <functional>
++#include <string>
++
++#include "d3d11_include.h"
++
++namespace dxvk {
++
++  /**
++   * \brief Debug capture of compute dispatches (BSI local patch)
++   *
++   * Off unless \c BSI_CS_CAPTURE=<dir> is set; see d3d11_bsi_capture.cpp.
++   * \returns \c true if the current dispatch should be captured
++   */
++  bool BsiCsCaptureActive();
++
++  void BsiCsCapture(
++          ID3D11DeviceContext*  ctx,
++    const std::string&          shaderName,
++          UINT                  x,
++          UINT                  y,
++          UINT                  z,
++          bool                  post);
++
++  /**
++   * \brief Runs the original code of a replaced shader during a capture
++   *
++   * Saves the bound UAV resources, calls \c runOriginal (which records a
++   * dispatch of the original shader), dumps the UAVs as \c _orig and
++   * restores their previous content, so the real dispatch that follows
++   * (the replacement) sees exactly the same inputs.
++   */
++  void BsiCsCaptureOriginal(
++          ID3D11DeviceContext*  ctx,
++    const std::function<void()>& runOriginal);
++
++}
+diff --git a/src/dxvk/dxvk_shader_ir.cpp b/src/dxvk/dxvk_shader_ir.cpp
+--- a/src/dxvk/dxvk_shader_ir.cpp
++++ b/src/dxvk/dxvk_shader_ir.cpp
+@@ -2,9 +2,11 @@
+ 
+ #include <spirv/spirv_builder.h>
+ 
++#include "../util/util_env.h"
+ #include <util/util_log.h>
+ 
+ #include "dxvk_shader_ir.h"
++#include "dxvk_shader_replace.h"
+ 
+ namespace dxvk {
+ 
+@@ -2022,6 +2024,48 @@
+   SpirvCodeBuffer DxvkIrShader::getCode(
+     const DxvkShaderBindingMap*       bindings,
+     const DxvkShaderLinkage*          linkage) {
++    SpirvCodeBuffer code = buildCode(bindings, linkage);
++
++    // BSI local patch: replacement shader (BSI_SHADER_REPLACE)
++    if (auto repl = getValidReplacement()) {
++      SpirvCodeBuffer patched;
++
++      if (DxvkShaderReplacer::patch(m_debugName, *repl, code, patched)) {
++        if (!m_loggedReplacement.exchange(true))
++          Logger::info(str::format("BSI shader replacement: using ", repl->file, " for ", m_debugName));
++        return patched;
++      }
++    }
++
++    return code;
++  }
++
++
++  const DxvkShaderReplacement* DxvkIrShader::getValidReplacement() {
++    if (m_replDisabled || !DxvkShaderReplacer::has(m_debugName))
++      return nullptr;
++
++    std::call_once(m_replOnce, [this] {
++      // The variant must have been derived from exactly this code (same
++      // DXVK build, same device options): hash of the unmapped SPIR-V,
++      // which is also what DXVK_SHADER_DUMP_PATH writes as <name>.spv
++      SpirvCodeBuffer unmapped = buildCode(nullptr, nullptr);
++      auto repl = DxvkShaderReplacer::find(m_debugName, unmapped);
++
++      // Check that the interface can be matched before trusting it
++      SpirvCodeBuffer patched;
++
++      if (repl && DxvkShaderReplacer::patch(m_debugName, *repl, unmapped, patched))
++        m_repl = repl;
++    });
++
++    return m_repl;
++  }
++
++
++  SpirvCodeBuffer DxvkIrShader::buildCode(
++    const DxvkShaderBindingMap*       bindings,
++    const DxvkShaderLinkage*          linkage) {
+     convertIr("getCode()");
+ 
+     DxvkDxbcSpirvLogger logger(debugName());
+@@ -2154,7 +2198,7 @@
+ 
+ 
+   void DxvkIrShader::dump(std::ostream& outputStream) {
+-    auto code = getCode(nullptr, nullptr);
++    auto code = buildCode(nullptr, nullptr);
+     outputStream.write(reinterpret_cast<const char*>(code.data()), code.size());
+   }
+ 
+@@ -2183,7 +2227,31 @@
+     if (reason && Logger::logLevel() <= LogLevel::Debug)
+       Logger::debug(str::format(m_debugName, ": Early compile: ", reason));
+ 
+-    const auto& dumpPath = getShaderDumpPath();
++    // BSI local patch: BSI_SHADER_DUMP_FILTER=<name>[,<name>...] limits the
++    // dump to shaders whose debug name contains one of the given strings
++    // (e.g. the four HDAO compute shaders on the Quest instead of thousands)
++    static const std::vector<std::string> s_dumpFilter = [] {
++      std::vector<std::string> v;
++      std::string f = env::getEnvVar("BSI_SHADER_DUMP_FILTER");
++      size_t p = 0;
++      while (p < f.size()) {
++        size_t e = f.find(',', p);
++        if (e == std::string::npos) e = f.size();
++        if (e > p) v.push_back(f.substr(p, e - p));
++        p = e + 1;
++      }
++      return v;
++    }();
++
++    std::string dumpPath = getShaderDumpPath();
++
++    if (!dumpPath.empty() && !s_dumpFilter.empty()) {
++      bool match = false;
++      for (const auto& f : s_dumpFilter)
++        match |= m_debugName.find(f) != std::string::npos;
++      if (!match)
++        dumpPath.clear();
++    }
+ 
+     if (!dumpPath.empty())
+       dumpSource(dumpPath);
+@@ -2305,7 +2373,7 @@
+   void DxvkIrShader::dumpSpv(const std::string& path) {
+     std::ofstream file(str::topath(str::format(path, "/", m_debugName, ".spv").c_str()).c_str(), std::ios_base::trunc | std::ios_base::binary);
+ 
+-    auto code = getCode(nullptr, nullptr);
++    auto code = buildCode(nullptr, nullptr);
+     file.write(reinterpret_cast<const char*>(code.data()), code.size());
+   }
+ 
+diff --git a/src/dxvk/dxvk_shader_ir.h b/src/dxvk/dxvk_shader_ir.h
+--- a/src/dxvk/dxvk_shader_ir.h
++++ b/src/dxvk/dxvk_shader_ir.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <mutex>
++
+ #include <atomic>
+ #include <string>
+ #include <vector>
+@@ -11,6 +13,7 @@
+ #include <ir/passes/ir_pass_lower_io.h>
+ 
+ #include "dxvk_shader.h"
++#include "dxvk_shader_replace.h"
+ 
+ #include "../util/thread.h"
+ 
+@@ -157,6 +160,24 @@
+       const DxvkShaderLinkage*          linkage);
+ 
+     /**
++     * \brief Checks for a usable replacement shader (BSI local patch)
++     *
++     * \returns Replacement if one exists for this shader and its
++     *    interface matches the original, \c nullptr otherwise.
++     */
++    const DxvkShaderReplacement* getValidReplacement();
++
++    /**
++     * \brief Never use a replacement for this shader object (BSI local patch)
++     *
++     * For the original-code twin that BSI_CS_CAPTURE_ORIG runs next to a
++     * replaced compute shader. Must be called before the code is used.
++     */
++    void disableReplacement() {
++      m_replDisabled = true;
++    }
++
++    /**
+      * \brief Queries shader binding layout
+      * \returns Pipeline layout builder
+      */
+@@ -194,6 +215,15 @@
+ 
+     DxvkShaderMetadata            m_metadata = { };
+ 
++    std::atomic<bool>             m_loggedReplacement = { false };
++    std::once_flag                m_replOnce;
++    const DxvkShaderReplacement*  m_repl = nullptr;
++    bool                          m_replDisabled = false;
++
++    SpirvCodeBuffer buildCode(
++      const DxvkShaderBindingMap*       bindings,
++      const DxvkShaderLinkage*          linkage);
++
+     void convertIr(const char* reason);
+ 
+     void convertShader();
+diff --git a/src/dxvk/meson.build b/src/dxvk/meson.build
+--- a/src/dxvk/meson.build
++++ b/src/dxvk/meson.build
+@@ -74,6 +74,7 @@
+   'dxvk_shader_cache.cpp',
+   'dxvk_shader_io.cpp',
+   'dxvk_shader_ir.cpp',
++  'dxvk_shader_replace.cpp',
+   'dxvk_shader_key.cpp',
+   'dxvk_shader_spirv.cpp',
+   'dxvk_signal.cpp',
+diff --git a/src/dxvk/dxvk_shader_replace.cpp b/src/dxvk/dxvk_shader_replace.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/dxvk/dxvk_shader_replace.cpp
+@@ -0,0 +1,365 @@
++// BSI local patch (never upstream): load replacement SPIR-V for individual
++// shaders by name, see dxvk_shader_replace.h.
++#include <algorithm>
++#include <array>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <memory>
++#include <map>
++#include <mutex>
++#include <sstream>
++#include <unordered_map>
++
++#include "dxvk_shader_replace.h"
++
++#include "../util/log/log.h"
++#include "../util/util_env.h"
++#include "../util/util_string.h"
++
++namespace dxvk {
++
++  namespace {
++
++    constexpr uint32_t OpName           = 5u;
++    constexpr uint32_t OpMemberName     = 6u;
++    constexpr uint32_t OpTypePointer    = 32u;
++    constexpr uint32_t OpVariable       = 59u;
++    constexpr uint32_t OpDecorate       = 71u;
++    constexpr uint32_t OpMemberDecorate = 72u;
++
++    constexpr uint32_t DecBinding       = 33u;
++    constexpr uint32_t DecDescriptorSet = 34u;
++    constexpr uint32_t DecOffset        = 35u;
++
++    constexpr uint32_t ScPushConstant   = 9u;
++
++    struct SpvInterface {
++      std::unordered_map<uint32_t, std::string> names;
++      std::map<std::pair<uint32_t, uint32_t>, std::string> memberNames;
++      // id -> word index of the literal operand, for patching
++      std::unordered_map<uint32_t, size_t> setWord;
++      std::unordered_map<uint32_t, size_t> bindingWord;
++      // (struct, member) -> word index of the offset literal
++      std::map<std::pair<uint32_t, uint32_t>, size_t> offsetWord;
++      std::unordered_map<uint32_t, uint32_t> pushPtrToStruct;
++      std::vector<uint32_t> pushStructs;
++    };
++
++    std::string readString(const uint32_t* words, size_t count) {
++      std::string s;
++      for (size_t i = 0; i < count; i++) {
++        for (uint32_t b = 0; b < 4; b++) {
++          char c = char((words[i] >> (8u * b)) & 0xffu);
++          if (!c)
++            return s;
++          s.push_back(c);
++        }
++      }
++      return s;
++    }
++
++    bool parse(const uint32_t* code, size_t dwords, SpvInterface& io) {
++      if (dwords < 5u || code[0] != 0x07230203u)
++        return false;
++
++      std::vector<std::pair<uint32_t, uint32_t>> pushVars; // (ptr type, var)
++
++      size_t i = 5u;
++      while (i < dwords) {
++        uint32_t len = code[i] >> 16;
++        uint32_t op  = code[i] & 0xffffu;
++
++        if (!len || i + len > dwords)
++          return false;
++
++        const uint32_t* w = &code[i];
++
++        switch (op) {
++          case OpName:
++            if (len >= 3u) io.names[w[1]] = readString(&w[2], len - 2u);
++            break;
++          case OpMemberName:
++            if (len >= 4u) io.memberNames[{ w[1], w[2] }] = readString(&w[3], len - 3u);
++            break;
++          case OpDecorate:
++            if (len >= 4u && w[2] == DecDescriptorSet) io.setWord[w[1]] = i + 3u;
++            if (len >= 4u && w[2] == DecBinding)       io.bindingWord[w[1]] = i + 3u;
++            break;
++          case OpMemberDecorate:
++            if (len >= 5u && w[3] == DecOffset) io.offsetWord[{ w[1], w[2] }] = i + 4u;
++            break;
++          case OpTypePointer:
++            if (len >= 4u && w[2] == ScPushConstant) io.pushPtrToStruct[w[1]] = w[3];
++            break;
++          case OpVariable:
++            if (len >= 4u && w[3] == ScPushConstant) pushVars.push_back({ w[1], w[2] });
++            break;
++          default:
++            break;
++        }
++
++        i += len;
++      }
++
++      for (const auto& v : pushVars) {
++        auto e = io.pushPtrToStruct.find(v.first);
++        if (e != io.pushPtrToStruct.end())
++          io.pushStructs.push_back(e->second);
++      }
++
++      return true;
++    }
++
++
++    struct Variant {
++      uint64_t srcHash = 0u;
++      std::string file;
++      std::array<uint32_t, 3> dispatchScale = {{ 1u, 1u, 1u }};
++      std::unique_ptr<DxvkShaderReplacement> loaded;
++      bool tried = false;
++    };
++
++    struct Registry {
++      std::mutex mutex;
++      bool initialized = false;
++      std::string dir;
++      std::unordered_map<std::string, std::vector<Variant>> cache;
++    };
++
++    Registry& registry() {
++      static Registry s_registry;
++      return s_registry;
++    }
++
++    void initRegistry(Registry& reg) {
++      if (reg.initialized)
++        return;
++
++      reg.dir = env::getEnvVar("BSI_SHADER_REPLACE");
++      reg.initialized = true;
++
++      if (!reg.dir.empty())
++        Logger::info(str::format("BSI shader replacement: ", reg.dir));
++    }
++
++    std::vector<Variant>& variants(Registry& reg, const std::string& name) {
++      auto entry = reg.cache.find(name);
++      if (entry != reg.cache.end())
++        return entry->second;
++
++      std::vector<Variant> list;
++      std::ifstream txt(str::topath(str::format(reg.dir, "/", name, ".txt").c_str()).c_str());
++      std::string line;
++
++      while (txt && std::getline(txt, line)) {
++        std::istringstream ls(line);
++        std::string key, hash;
++        ls >> key;
++
++        if (key != "variant")
++          continue;
++
++        Variant v;
++        ls >> hash >> v.file;
++        v.srcHash = std::strtoull(hash.c_str(), nullptr, 16);
++
++        std::string opt;
++        while (ls >> opt) {
++          if (opt == "dispatch_scale") {
++            for (uint32_t k = 0; k < 3u; k++) {
++              uint32_t n = 1u;
++              if (ls >> n)
++                v.dispatchScale[k] = std::max(n, 1u);
++            }
++          }
++        }
++
++        if (!v.file.empty())
++          list.push_back(std::move(v));
++      }
++
++      return reg.cache.emplace(name, std::move(list)).first->second;
++    }
++
++  }
++
++
++  bool DxvkShaderReplacer::enabled() {
++    auto& reg = registry();
++    std::lock_guard lock(reg.mutex);
++    initRegistry(reg);
++    return !reg.dir.empty();
++  }
++
++
++  bool DxvkShaderReplacer::has(const std::string& name) {
++    auto& reg = registry();
++    std::lock_guard lock(reg.mutex);
++    initRegistry(reg);
++    return !reg.dir.empty() && !variants(reg, name).empty();
++  }
++
++
++  uint64_t DxvkShaderReplacer::hash(const uint32_t* code, size_t dwords) {
++    uint64_t h = 0xcbf29ce484222325ull;
++
++    for (size_t i = 0; i < dwords; i++) {
++      for (uint32_t b = 0; b < 4u; b++) {
++        h ^= (code[i] >> (8u * b)) & 0xffu;
++        h *= 0x100000001b3ull;
++      }
++    }
++
++    return h;
++  }
++
++
++  const DxvkShaderReplacement* DxvkShaderReplacer::find(
++    const std::string&            name,
++    const SpirvCodeBuffer&        original) {
++    auto& reg = registry();
++    std::lock_guard lock(reg.mutex);
++    initRegistry(reg);
++
++    if (reg.dir.empty())
++      return nullptr;
++
++    auto& list = variants(reg, name);
++
++    if (list.empty())
++      return nullptr;
++
++    uint64_t srcHash = hash(original.data(), original.dwords());
++
++    for (auto& v : list) {
++      if (v.srcHash != srcHash)
++        continue;
++
++      if (!v.tried) {
++        v.tried = true;
++
++        std::ifstream spv(str::topath(str::format(reg.dir, "/", v.file).c_str()).c_str(), std::ios::binary);
++        std::vector<char> bytes;
++
++        if (spv)
++          bytes.assign((std::istreambuf_iterator<char>(spv)), std::istreambuf_iterator<char>());
++
++        if (bytes.size() >= 20u && !(bytes.size() & 3u)) {
++          v.loaded = std::make_unique<DxvkShaderReplacement>();
++          v.loaded->file = v.file;
++          v.loaded->srcHash = v.srcHash;
++          v.loaded->dispatchScale = v.dispatchScale;
++          v.loaded->code.resize(bytes.size() / 4u);
++          std::memcpy(v.loaded->code.data(), bytes.data(), bytes.size());
++
++          Logger::info(str::format("BSI shader replacement: ", name, " -> ", v.file, " (", bytes.size(), " bytes, dispatch scale ",
++            v.dispatchScale[0], "x", v.dispatchScale[1], "x", v.dispatchScale[2], ")"));
++        } else {
++          Logger::err(str::format("BSI shader replacement: ", v.file, " missing or not SPIR-V"));
++        }
++      }
++
++      return v.loaded.get();
++    }
++
++    char hex[24];
++    std::snprintf(hex, sizeof(hex), "%016llx", (unsigned long long) srcHash);
++    Logger::warn(str::format("BSI shader replacement: ", name, ": no variant for source hash ",
++      hex, ", keeping the original shader"));
++    return nullptr;
++  }
++
++
++  bool DxvkShaderReplacer::patch(
++    const std::string&            name,
++    const DxvkShaderReplacement&  repl,
++    const SpirvCodeBuffer&        original,
++          SpirvCodeBuffer&        result) {
++    SpvInterface src, dst;
++
++    if (!parse(original.data(), original.dwords(), src)) {
++      Logger::err(str::format("BSI shader replacement: ", name, ": failed to parse original SPIR-V"));
++      return false;
++    }
++
++    std::vector<uint32_t> code = repl.code;
++
++    if (!parse(code.data(), code.size(), dst)) {
++      Logger::err(str::format("BSI shader replacement: ", name, ": failed to parse replacement SPIR-V"));
++      return false;
++    }
++
++    // Original descriptor variables by debug name
++    std::unordered_map<std::string, uint32_t> srcByName;
++
++    for (const auto& e : src.setWord) {
++      auto n = src.names.find(e.first);
++
++      if (n != src.names.end() && !n->second.empty())
++        srcByName[n->second] = e.first;
++    }
++
++    for (const auto& e : dst.setWord) {
++      auto n = dst.names.find(e.first);
++
++      if (n == dst.names.end() || srcByName.find(n->second) == srcByName.end()) {
++        Logger::err(str::format("BSI shader replacement: ", name, ": descriptor '",
++          n != dst.names.end() ? n->second : std::string("<unnamed>"), "' not in the original"));
++        return false;
++      }
++
++      uint32_t srcId = srcByName[n->second];
++      auto b = dst.bindingWord.find(e.first);
++      auto sb = src.bindingWord.find(srcId);
++
++      if (b == dst.bindingWord.end() || sb == src.bindingWord.end()) {
++        Logger::err(str::format("BSI shader replacement: ", name, ": '", n->second, "' has no binding"));
++        return false;
++      }
++
++      code[e.second] = original.data()[src.setWord[srcId]];
++      code[b->second] = original.data()[sb->second];
++    }
++
++    // Push data members by debug name
++    if (!dst.pushStructs.empty()) {
++      std::unordered_map<std::string, size_t> srcMembers;
++
++      for (uint32_t s : src.pushStructs) {
++        for (const auto& m : src.memberNames) {
++          if (m.first.first != s)
++            continue;
++
++          auto o = src.offsetWord.find(m.first);
++
++          if (o != src.offsetWord.end())
++            srcMembers[m.second] = o->second;
++        }
++      }
++
++      for (uint32_t s : dst.pushStructs) {
++        for (const auto& o : dst.offsetWord) {
++          if (o.first.first != s)
++            continue;
++
++          auto m = dst.memberNames.find(o.first);
++          auto e = m != dst.memberNames.end() ? srcMembers.find(m->second) : srcMembers.end();
++
++          if (e == srcMembers.end()) {
++            Logger::err(str::format("BSI shader replacement: ", name, ": push data member '",
++              m != dst.memberNames.end() ? m->second : std::string("<unnamed>"), "' not in the original"));
++            return false;
++          }
++
++          code[o.second] = original.data()[e->second];
++        }
++      }
++    }
++
++    result = SpirvCodeBuffer(std::move(code));
++    return true;
++  }
++
++}
+diff --git a/src/dxvk/dxvk_shader_replace.h b/src/dxvk/dxvk_shader_replace.h
+new file mode 100644
+--- /dev/null
++++ b/src/dxvk/dxvk_shader_replace.h
+@@ -0,0 +1,95 @@
++#pragma once
++
++#include <array>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include "../spirv/spirv_code_buffer.h"
++
++namespace dxvk {
++
++  /**
++   * \brief Replacement shader (BSI local patch, never upstream)
++   *
++   * Enabled with \c BSI_SHADER_REPLACE=<dir>. For a shader whose DXVK debug
++   * name is \c <name> (the name \c DXVK_SHADER_DUMP_PATH uses, e.g.
++   * \c cs.<md5>), \c <dir>/<name>.txt lists the available variants:
++   *
++   *   variant <srchash> <file.spv> [dispatch_scale X Y Z]
++   *
++   * \c <srchash> is the 64-bit FNV-1a hash (16 hex digits) of the original
++   * shader's unmapped SPIR-V, i.e. exactly the \c <name>.spv file that
++   * \c DXVK_SHADER_DUMP_PATH writes on that device. A variant is only used if
++   * its hash matches the original that DXVK produced on this device and DXVK
++   * version, so a replacement derived from one device's code is never applied
++   * to different code (other driver options, other DXVK build): those fall
++   * back to the original shader.
++   *
++   * \c dispatch_scale multiplies the Dispatch() group counts (a compute
++   * replacement with smaller workgroups covering the same pixels).
++   *
++   * The replacement declares its resources with the same debug names as the
++   * original (OpName on descriptor variables, OpMemberName on push-data
++   * members). Set/binding decorations and push-data member offsets are
++   * copied from the original's final SPIR-V at pipeline compile time, so the
++   * replacement follows whatever binding model DXVK picked on the device. Any
++   * mismatch logs an error and keeps the original shader.
++   */
++  struct DxvkShaderReplacement {
++    std::string             file;
++    uint64_t                srcHash = 0u;
++    std::vector<uint32_t>   code;
++    std::array<uint32_t, 3> dispatchScale = {{ 1u, 1u, 1u }};
++  };
++
++
++  class DxvkShaderReplacer {
++
++  public:
++
++    /**
++     * \brief Whether replacement is enabled at all
++     */
++    static bool enabled();
++
++    /**
++     * \brief Whether any replacement variant is listed for a shader name
++     */
++    static bool has(const std::string& name);
++
++    /**
++     * \brief Looks up a replacement for a shader
++     *
++     * \param [in] name Shader debug name
++     * \param [in] original Unmapped SPIR-V of the original shader
++     *    (the code \c DXVK_SHADER_DUMP_PATH writes)
++     * \returns Matching replacement, or \c nullptr
++     */
++    static const DxvkShaderReplacement* find(
++      const std::string&            name,
++      const SpirvCodeBuffer&        original);
++
++    /**
++     * \brief Builds the final replacement code
++     *
++     * \param [in] name Shader name (for logging)
++     * \param [in] repl Replacement
++     * \param [in] original Final SPIR-V of the original shader
++     * \param [out] result Patched replacement code
++     * \returns \c true on success
++     */
++    static bool patch(
++      const std::string&            name,
++      const DxvkShaderReplacement&  repl,
++      const SpirvCodeBuffer&        original,
++            SpirvCodeBuffer&        result);
++
++    /**
++     * \brief 64-bit FNV-1a over SPIR-V words (little-endian bytes)
++     */
++    static uint64_t hash(const uint32_t* code, size_t dwords);
++
++  };
++
++}

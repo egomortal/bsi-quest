@@ -1,0 +1,46 @@
+# BSI-Quest lab scenario v3 (build 78). Menu flow on the Quest, from j0005 screenshots (19 Oct):
+#   startup movies (~35 s, skipped here via skip_intro.txt) -> "PRESS ANY KEY" -> "Login Failed" dialog
+#   (A = EXIT GAME, B = Proceed Without Login) -> main menu (Main Game first) -> Main Game sign (Continue first).
+# The "saved-game populate task" log line comes ~11 s after start on its own: it is NOT a sign of the title press.
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+mark press_any_key
+press A
+wait 8
+mark login_failed
+# B = Proceed Without Login (A here would exit the game)
+press B 200
+wait 8
+mark main_menu
+press A
+wait 6
+mark main_game_sign
+press A
+on_timeout continue
+wait_map_not XEntry_P 150
+on_timeout quit
+mark loading
+wait_map Master_P 300
+wait 45
+mark static_default
+wait 60
+mark sweep_default
+head sweep 35 8 6
+wait 60
+head static
+mark ab1_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab2_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark ab3_no_shadow_eye
+copy lab_vr_stereo_no_shadow_eye.txt vr_stereo.txt
+wait 60
+mark ab4_default
+copy lab_vr_stereo_default.txt vr_stereo.txt
+wait 60
+mark end
+quit

@@ -1,0 +1,304 @@
+From 78df014033e740902669cda7fb2326a240b7912e Mon Sep 17 00:00:00 2001
+From: BSI-Quest <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 13:10:54 -0400
+Subject: [PATCH 1/3] Android WSI backend for DXVK native (BSI-Quest local
+ build)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GUbqah58H7DS3qKtZbDRP9
+---
+ meson.build                              | 15 +++--
+ src/wsi/android/wsi_platform_android.cpp | 72 ++++++++++++++++++++++++
+ src/wsi/meson.build                      |  4 ++
+ src/wsi/wsi_platform.cpp                 |  5 ++
+ src/wsi/wsi_platform.h                   |  3 +
+ 5 files changed, 95 insertions(+), 4 deletions(-)
+ create mode 100644 src/wsi/android/wsi_platform_android.cpp
+
+diff --git a/meson.build b/meson.build
+index 4964301..c928cd8 100644
+--- a/meson.build
++++ b/meson.build
+@@ -161,17 +161,24 @@ else
+   if lib_glfw.found()
+     compiler_args += ['-DDXVK_WSI_GLFW']
+   endif
+-  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found())
++  if host_machine.system() == 'android'
++    compiler_args += ['-DDXVK_WSI_ANDROID']
++  endif
++  if (not lib_sdl3.found() and not lib_sdl2.found() and not lib_glfw.found() and host_machine.system() != 'android')
+     error('SDL3, SDL2, or GLFW are required to build dxvk-native')
+   endif
+   
+   dxvk_name_prefix = 'dxvk_'
+   dxvk_pkg_prefix = 'dxvk-'
+ 
++  if host_machine.system() == 'android'
++    link_args += [ '-static-libstdc++' ]
++  else
+   link_args += [
+-    '-static-libgcc',
+-    '-static-libstdc++',
+-  ]
++      '-static-libgcc',
++      '-static-libstdc++',
++    ]
++  endif
+ endif
+ 
+ dxbc_spirv = subproject('dxbc-spirv')
+diff --git a/src/wsi/android/wsi_platform_android.cpp b/src/wsi/android/wsi_platform_android.cpp
+new file mode 100644
+index 0000000..e6561e5
+--- /dev/null
++++ b/src/wsi/android/wsi_platform_android.cpp
+@@ -0,0 +1,72 @@
++#if defined(DXVK_WSI_ANDROID)
++// Android WSI for DXVK native (BSI-Quest): HWND is an ANativeWindow*. One "monitor" = the window's surface.
++#include "../wsi_platform.h"
++#include "../wsi_monitor.h"
++#include "../wsi_window.h"
++#include "../../util/util_error.h"
++#include "../../util/log/log.h"
++#include <android/native_window.h>
++#include <vulkan/vulkan_android.h>
++#include <cstring>
++#include <cstdlib>
++
++namespace dxvk::wsi {
++
++  static ANativeWindow* toWin(HWND h) { return reinterpret_cast<ANativeWindow*>(h); }
++  static void winSize(HWND h, uint32_t* w, uint32_t* hh) {
++    int32_t W = 1920, H = 1080;
++    if (h) { W = ANativeWindow_getWidth(toWin(h)); H = ANativeWindow_getHeight(toWin(h)); }
++    else if (const char* e = getenv("BSI_ANDROID_SIZE")) { sscanf(e, "%dx%d", &W, &H); }
++    if (w) *w = uint32_t(W); if (hh) *hh = uint32_t(H);
++  }
++
++  class AndroidWsiDriver : public WsiDriver {
++  public:
++    std::vector<const char *> getInstanceExtensions() override {
++      return { VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME };
++    }
++    HMONITOR getDefaultMonitor() override { return enumMonitors(0); }
++    HMONITOR enumMonitors(uint32_t index) override { return index == 0 ? reinterpret_cast<HMONITOR>(intptr_t(1)) : nullptr; }
++    HMONITOR enumMonitors(const LUID *adapterLUID[], uint32_t numLUIDs, uint32_t index) override { return enumMonitors(index); }
++    bool getDisplayName(HMONITOR hMonitor, WCHAR (&Name)[32]) override {
++      std::memset(Name, 0, sizeof(Name)); const char* n = "\\\\.\\DISPLAY1";
++      for (int i = 0; n[i]; i++) Name[i] = WCHAR(n[i]); return true;
++    }
++    bool getDesktopCoordinates(HMONITOR hMonitor, RECT* pRect) override {
++      uint32_t w, h; winSize(nullptr, &w, &h);
++      pRect->left = 0; pRect->top = 0; pRect->right = LONG(w); pRect->bottom = LONG(h); return true;
++    }
++    bool mode(uint32_t n, WsiMode* m) {
++      if (n > 0) return false; uint32_t w, h; winSize(nullptr, &w, &h);
++      m->width = w; m->height = h; m->refreshRate = WsiRational{ 72000, 1000 }; m->bitsPerPixel = 32; m->interlaced = false; return true;
++    }
++    bool getDisplayMode(HMONITOR, uint32_t n, WsiMode* m) override { return mode(n, m); }
++    bool getCurrentDisplayMode(HMONITOR, WsiMode* m) override { return mode(0, m); }
++    bool getDesktopDisplayMode(HMONITOR, WsiMode* m) override { return mode(0, m); }
++    WsiEdidData getMonitorEdid(HMONITOR) override { return {}; }
++    void getWindowSize(HWND h, uint32_t* w, uint32_t* hh) override { winSize(h, w, hh); }
++    void resizeWindow(HWND, DxvkWindowState*, uint32_t, uint32_t) override { }
++    void saveWindowState(HWND, DxvkWindowState*, bool) override { }
++    void restoreWindowState(HWND, DxvkWindowState*, bool) override { }
++    bool setWindowMode(HMONITOR, HWND, DxvkWindowState*, const WsiMode&) override { return true; }
++    bool enterFullscreenMode(HMONITOR, HWND, DxvkWindowState*, bool) override { return true; }
++    bool leaveFullscreenMode(HWND, DxvkWindowState*) override { return true; }
++    bool restoreDisplayMode() override { return true; }
++    HMONITOR getWindowMonitor(HWND) override { return reinterpret_cast<HMONITOR>(intptr_t(1)); }
++    bool isWindow(HWND h) override { return h != nullptr; }
++    bool isMinimized(HWND) override { return false; }
++    bool isOccluded(HWND) override { return false; }
++    void updateFullscreenWindow(HMONITOR, HWND, bool) override { }
++    VkResult createSurface(HWND h, PFN_vkGetInstanceProcAddr gpa, VkInstance instance, VkSurfaceKHR* pSurface) override {
++      auto fn = reinterpret_cast<PFN_vkCreateAndroidSurfaceKHR>(gpa(instance, "vkCreateAndroidSurfaceKHR"));
++      if (!fn) return VK_ERROR_EXTENSION_NOT_PRESENT;
++      VkAndroidSurfaceCreateInfoKHR ci = { VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
++      ci.window = toWin(h);
++      return fn(instance, &ci, nullptr, pSurface);
++    }
++  };
++
++  static bool createAndroidWsiDriver(WsiDriver **driver) { *driver = new AndroidWsiDriver(); return true; }
++  WsiBootstrap AndroidWSI = { "Android", createAndroidWsiDriver };
++}
++#endif
+diff --git a/src/wsi/meson.build b/src/wsi/meson.build
+index 1d88e2c..b6a205f 100644
+--- a/src/wsi/meson.build
++++ b/src/wsi/meson.build
+@@ -13,6 +13,7 @@ wsi_src = [
+   'glfw/wsi_monitor_glfw.cpp',
+   'glfw/wsi_platform_glfw.cpp',
+   'glfw/wsi_window_glfw.cpp',
++  'android/wsi_platform_android.cpp',
+ ]
+ 
+ wsi_deps = [ dep_displayinfo ]
+@@ -21,6 +22,9 @@ if platform == 'windows'
+   lib_setupapi = cpp.find_library('setupapi')
+   wsi_deps += [ lib_setupapi ]
+ else
++  if host_machine.system() == 'android'
++    wsi_deps += [ cpp.find_library('android') ]
++  endif
+   wsi_deps += [
+     lib_sdl3.partial_dependency(compile_args: true, includes: true),
+     lib_sdl2.partial_dependency(compile_args: true, includes: true),
+diff --git a/src/wsi/wsi_platform.cpp b/src/wsi/wsi_platform.cpp
+index 08f456e..d7f1b68 100644
+--- a/src/wsi/wsi_platform.cpp
++++ b/src/wsi/wsi_platform.cpp
+@@ -20,6 +20,9 @@ namespace dxvk::wsi {
+ #endif
+ #if defined(DXVK_WSI_GLFW)
+     &GlfwWSI,
++#endif
++#if defined(DXVK_WSI_ANDROID)
++    &AndroidWSI,
+ #endif
+   };
+ 
+@@ -33,6 +36,8 @@ namespace dxvk::wsi {
+         // for other platforms however we _need_ to know which WSI to use!
+ #if defined(DXVK_WSI_WIN32)
+         hint = "Win32";
++#elif defined(DXVK_WSI_ANDROID)
++        hint = "Android";
+ #else
+         throw DxvkError("DXVK_WSI_DRIVER environment variable unset");
+ #endif
+diff --git a/src/wsi/wsi_platform.h b/src/wsi/wsi_platform.h
+index f1fae3f..97433d7 100644
+--- a/src/wsi/wsi_platform.h
++++ b/src/wsi/wsi_platform.h
+@@ -123,6 +123,9 @@ namespace dxvk::wsi {
+ #if defined(DXVK_WSI_GLFW)
+   extern WsiBootstrap GlfwWSI;
+ #endif
++#if defined(DXVK_WSI_ANDROID)
++  extern WsiBootstrap AndroidWSI;
++#endif
+ 
+   void init();
+   void quit();
+-- 
+2.43.0
+
+
+From c09e2f7ed87988daa5a02f353b4acc1fbfbb0496 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:36:53 -0400
+Subject: [PATCH 2/3] Android: app-provided libvulkan handle (adrenotools), log
+ all missing features
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GUbqah58H7DS3qKtZbDRP9
+---
+ src/dxvk/dxvk_device_info.cpp |  7 ++++++-
+ src/vulkan/vulkan_loader.cpp  | 24 ++++++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index ab1f563..1989818 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -773,6 +773,7 @@ namespace dxvk {
+     if (m_queueMapping.graphics.family == VK_QUEUE_FAMILY_IGNORED)
+       return std::string("Device does not have a graphics queue");
+ 
++    std::optional<std::string> firstMissing;
+     for (const auto& f : getFeatureList()) {
+       if (f.featureRequired && !(*f.featureEnabled)) {
+         std::string message = str::format("Device does not support required feature '", f.readableName, "'");
+@@ -780,9 +781,13 @@ namespace dxvk {
+         if (f.extensionEnabled)
+           message += str::format(" (extension: ", f.extensionEnabled->extensionName, ")");
+ 
+-        return message;
++        Logger::warn(str::format("  missing: ", message));
++        if (!firstMissing)
++          firstMissing = message;
+       }
+     }
++    if (firstMissing)
++      return firstMissing;
+ 
+     if (!m_featuresEnabled.extDescriptorHeap.descriptorHeap && m_properties.core.properties.limits.maxPushConstantsSize < MaxTotalPushDataSize)
+       return str::format("Device does not support ", MaxTotalPushDataSize, " of push data");
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+index f9d1e98..aca10e0 100644
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -1,4 +1,5 @@
+ #include <tuple>
++#include <cstdlib>
+ 
+ #include "vulkan_loader.h"
+ 
+@@ -10,6 +11,29 @@
+ namespace dxvk::vk {
+ 
+   static std::pair<HMODULE, PFN_vkGetInstanceProcAddr> loadVulkanLibrary() {
++    /* BSI-Quest: optional custom driver, e.g. a Turnip (Mesa) ICD shipped with the app */
++    if (const char* h = getenv("BSI_VULKAN_HANDLE")) {
++      /* libvulkan instance opened by the app (e.g. through adrenotools with a custom driver) */
++      HMODULE library = reinterpret_cast<HMODULE>(strtoull(h, nullptr, 16));
++      auto proc = library ? GetProcAddress(library, "vkGetInstanceProcAddr") : nullptr;
++      if (proc) {
++        Logger::info("Vulkan: using app-provided libvulkan handle (custom driver)");
++        return std::make_pair(library, reinterpret_cast<PFN_vkGetInstanceProcAddr>(proc));
++      }
++      Logger::err("Vulkan: app-provided libvulkan handle has no vkGetInstanceProcAddr, falling back");
++    }
++    if (const char* custom = getenv("BSI_VULKAN_LIB")) {
++      if (HMODULE library = LoadLibraryA(custom)) {
++        auto proc = GetProcAddress(library, "vkGetInstanceProcAddr");
++        if (!proc) proc = GetProcAddress(library, "vk_icdGetInstanceProcAddr");
++        if (proc) {
++          Logger::info(str::format("Vulkan: using custom driver ", custom));
++          return std::make_pair(library, reinterpret_cast<PFN_vkGetInstanceProcAddr>(proc));
++        }
++        FreeLibrary(library);
++      }
++      Logger::err(str::format("Vulkan: could not load custom driver ", custom, ", falling back to the system loader"));
++    }
+     static const std::array<const char*, 2> dllNames = {{
+ #ifdef _WIN32
+       "winevulkan.dll",
+-- 
+2.43.0
+
+
+From fcd79a2147c3e055eaa9339b65942933e2380ccc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:42:32 -0400
+Subject: [PATCH 3/3] Android: keep app-provided libvulkan handle open
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GUbqah58H7DS3qKtZbDRP9
+---
+ src/vulkan/vulkan_loader.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+index aca10e0..951a596 100644
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -74,7 +74,9 @@ namespace dxvk::vk {
+   }
+ 
+   LibraryLoader::~LibraryLoader() {
+-    if (m_library)
++    /* never close a libvulkan handle the app gave us: DXVK may be initialized again later */
++    const char* h = getenv("BSI_VULKAN_HANDLE");
++    if (m_library && !(h && reinterpret_cast<HMODULE>(strtoull(h, nullptr, 16)) == m_library))
+       FreeLibrary(m_library);
+   }
+ 
+-- 
+2.43.0
+

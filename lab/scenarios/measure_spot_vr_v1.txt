@@ -1,0 +1,63 @@
+# BSI-Quest lab, chat 3 (Step 0 measurement): one spot in VR, build 78. Continue loads the checkpoint the job picked
+# with save_spot. Menu flow = title_continue_ab_v4 (j0008). Phases are 90 s = 2-3 full [b1gp]/[b1perf] windows of 600 presents.
+on_timeout quit
+wait_map XEntry_P 300
+mark title_map
+wait 20
+mark press_any_key
+press A
+wait 8
+mark login_failed
+# B = Proceed Without Login (A here would exit the game)
+press B 200
+wait 8
+mark sign_in
+press A
+wait 8
+mark main_menu
+press A
+wait 8
+mark main_game_sign
+# Continue (first entry)
+press A
+on_timeout continue
+wait_map_not XEntry_P 180
+on_timeout quit
+mark loaded
+# start-of-area popups (e.g. "You've unlocked the golden Pistol & Machine Gun upgrades ... [A] ACCEPT", j0023): A accepts; in gameplay A = jump (harmless)
+# the DLC unlock popups come as a chain (golden weapons, Comstock's Eye, ...; j0052): six A presses, 3 s apart
+wait 10
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+wait 3
+press A
+head static 0 0
+# streaming settles
+wait 35
+mark m_yaw000
+wait 90
+head static 90 0
+mark m_yaw090
+wait 90
+head static 180 0
+mark m_yaw180
+wait 90
+head static -90 0
+mark m_yaw270
+wait 90
+head sweep 35 8 6
+mark m_sweep
+wait 90
+head static 0 0
+# the job's simpleperf step starts when it sees this marker (CPU samples, 45 s)
+mark cpuprof
+wait 80
+mark end
+quit

@@ -1,0 +1,29 @@
+From 9c056fc827f97a33581d654296c9f78b878f7352 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:42:32 -0400
+Subject: [PATCH 3/4] Android: keep app-provided libvulkan handle open
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GUbqah58H7DS3qKtZbDRP9
+---
+ src/vulkan/vulkan_loader.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+index aca10e0f..951a5960 100644
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -74,7 +74,9 @@ namespace dxvk::vk {
+   }
+ 
+   LibraryLoader::~LibraryLoader() {
+-    if (m_library)
++    /* never close a libvulkan handle the app gave us: DXVK may be initialized again later */
++    const char* h = getenv("BSI_VULKAN_HANDLE");
++    if (m_library && !(h && reinterpret_cast<HMODULE>(strtoull(h, nullptr, 16)) == m_library))
+       FreeLibrary(m_library);
+   }
+ 
+-- 
+2.43.0
+

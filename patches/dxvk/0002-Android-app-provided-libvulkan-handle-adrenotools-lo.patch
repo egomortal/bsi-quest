@@ -1,0 +1,83 @@
+From 984af20087787d3d09f921dfd37fbcf3dc861018 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 14:36:53 -0400
+Subject: [PATCH 2/4] Android: app-provided libvulkan handle (adrenotools), log
+ all missing features
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GUbqah58H7DS3qKtZbDRP9
+---
+ src/dxvk/dxvk_device_info.cpp |  7 ++++++-
+ src/vulkan/vulkan_loader.cpp  | 24 ++++++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index 63d89d9d..b609bc17 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -753,6 +753,7 @@ namespace dxvk {
+     if (m_queueMapping.graphics.family == VK_QUEUE_FAMILY_IGNORED)
+       return std::string("Device does not have a graphics queue");
+ 
++    std::optional<std::string> firstMissing;
+     for (const auto& f : getFeatureList()) {
+       if (f.featureRequired && !(*f.featureEnabled)) {
+         std::string message = str::format("Device does not support required feature '", f.readableName, "'");
+@@ -760,9 +761,13 @@ namespace dxvk {
+         if (f.extensionEnabled)
+           message += str::format(" (extension: ", f.extensionEnabled->extensionName, ")");
+ 
+-        return message;
++        Logger::warn(str::format("  missing: ", message));
++        if (!firstMissing)
++          firstMissing = message;
+       }
+     }
++    if (firstMissing)
++      return firstMissing;
+ 
+     if (!m_featuresEnabled.extDescriptorHeap.descriptorHeap && m_properties.core.properties.limits.maxPushConstantsSize < MaxTotalPushDataSize)
+       return str::format("Device does not support ", MaxTotalPushDataSize, " of push data");
+diff --git a/src/vulkan/vulkan_loader.cpp b/src/vulkan/vulkan_loader.cpp
+index f9d1e98d..aca10e0f 100644
+--- a/src/vulkan/vulkan_loader.cpp
++++ b/src/vulkan/vulkan_loader.cpp
+@@ -1,4 +1,5 @@
+ #include <tuple>
++#include <cstdlib>
+ 
+ #include "vulkan_loader.h"
+ 
+@@ -10,6 +11,29 @@
+ namespace dxvk::vk {
+ 
+   static std::pair<HMODULE, PFN_vkGetInstanceProcAddr> loadVulkanLibrary() {
++    /* BSI-Quest: optional custom driver, e.g. a Turnip (Mesa) ICD shipped with the app */
++    if (const char* h = getenv("BSI_VULKAN_HANDLE")) {
++      /* libvulkan instance opened by the app (e.g. through adrenotools with a custom driver) */
++      HMODULE library = reinterpret_cast<HMODULE>(strtoull(h, nullptr, 16));
++      auto proc = library ? GetProcAddress(library, "vkGetInstanceProcAddr") : nullptr;
++      if (proc) {
++        Logger::info("Vulkan: using app-provided libvulkan handle (custom driver)");
++        return std::make_pair(library, reinterpret_cast<PFN_vkGetInstanceProcAddr>(proc));
++      }
++      Logger::err("Vulkan: app-provided libvulkan handle has no vkGetInstanceProcAddr, falling back");
++    }
++    if (const char* custom = getenv("BSI_VULKAN_LIB")) {
++      if (HMODULE library = LoadLibraryA(custom)) {
++        auto proc = GetProcAddress(library, "vkGetInstanceProcAddr");
++        if (!proc) proc = GetProcAddress(library, "vk_icdGetInstanceProcAddr");
++        if (proc) {
++          Logger::info(str::format("Vulkan: using custom driver ", custom));
++          return std::make_pair(library, reinterpret_cast<PFN_vkGetInstanceProcAddr>(proc));
++        }
++        FreeLibrary(library);
++      }
++      Logger::err(str::format("Vulkan: could not load custom driver ", custom, ", falling back to the system loader"));
++    }
+     static const std::array<const char*, 2> dllNames = {{
+ #ifdef _WIN32
+       "winevulkan.dll",
+-- 
+2.43.0
+

@@ -1,0 +1,1 @@
+log=1 route=surface filter=none pad=3 res=auto eye_mpix=1.04 ao_eye=2 ls_eye=1 shadow_eye=0 fxaa_eye=1 bloom_eye=1 aa=off
