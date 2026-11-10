@@ -150,10 +150,42 @@ be combined with the translated code of the game (`LICENSE`, `LICENSE-EXCEPTION.
 share it, and if you share a changed version you must share your source under the same terms. The licence covers our
 code only; it gives no rights to the game.
 
-## Third-party code
+## Shout-outs
 
-DXVK (zlib licence) and Mesa (MIT) are not included; only our patches against them are, under those same licences. SMAA (MIT, see
-`kit/src_b1n/linux/SMAA_LICENSE.txt`) is included. Unicorn (GPL-2.0) is built separately and linked as a fallback emulator.
+BSI-Quest stands on a lot of other people's work. Thank you to the authors of everything below.
+
+**Runs inside the app**
+
+| Project | What we use it for | Licence |
+|---|---|---|
+| [DXVK](https://github.com/doitsujin/dxvk) 3.1.1 and dxbc-spirv, by Philip Rebohle and contributors | Direct3D 11 on Vulkan: the core our native renderer drives, and the shader translation | zlib |
+| [Mesa](https://www.mesa3d.org/) Turnip, by the freedreno developers | The open-source Vulkan driver for the Quest's Adreno GPU; without it none of this would run | MIT |
+| [Unicorn Engine](https://www.unicorn-engine.org/) 2.1.1 (built on [QEMU](https://www.qemu.org/)) | Fallback emulator for the rare game code the translator has not seen | GPL-2.0 |
+| [OpenXR](https://www.khronos.org/openxr/) SDK and loader, by Khronos | VR session, head and controller tracking, compositor layers | Apache-2.0 |
+| [libadrenotools](https://github.com/bylaws/libadrenotools), by Billy Laws | Loading our own Turnip build in place of the system driver | BSD-2-Clause |
+| [SMAA](https://github.com/iryoku/smaa), by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro and Diego Gutierrez | Optional anti-aliasing path | MIT |
+
+**Used to build and study it**
+
+| Project | What we use it for |
+|---|---|
+| [Ghidra](https://ghidra-sre.org/), by the NSA | Analysing the game's executable: functions, call graph, imports |
+| [Capstone](https://www.capstone-engine.org/) | Disassembler inside the translator |
+| [pefile](https://github.com/erocarrera/pefile), by Ero Carrera | Reading the Windows executable and its DLLs |
+| Android NDK (LLVM/clang) | Compiling everything for ARM64 |
+| [glslang](https://github.com/KhronosGroup/glslang), Meson and Ninja | Compiling our own shaders; building DXVK |
+| [pyaxml](https://github.com/androguard/pyaxml) and [cryptography](https://cryptography.io/) | Building the Android manifest and signing the APK |
+| [SideQuest](https://sidequestvr.com/) and adb | Installing and talking to the headset |
+| Meta's ovrgpuprofiler and Android's simpleperf | GPU and CPU measurements on the headset |
+
+**And**
+
+- The Turnip builders in the Android emulation community, whose driver builds we tested before making our own.
+- The static recompilation projects that showed this approach works for whole games (N64: Recompiled, Xbox 360 recompilation).
+- Irrational Games, for the game.
+
+The licence column lists each project's own licence; our patches to DXVK and Mesa are under those same licences
+(`patches/`). If we use your work and missed you here, open an issue and we will fix it.
 
 BSI-Quest is an unofficial fan project. BioShock Infinite is a trademark of Take-Two Interactive; this project is not
 affiliated with or endorsed by Take-Two Interactive or Irrational Games.
