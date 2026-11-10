@@ -2,8 +2,8 @@
   Install-BSIQuest.ps1 - put BioShock Infinite (your own Steam copy) on a Meta Quest 3.
 
   What it does, in order:
-    1. finds adb and exactly one connected headset
-    2. checks your game folder and that BioShockInfinite.exe is the build this app was made from
+    1. checks your game folder and that BioShockInfinite.exe is the build this app was made from
+    2. finds adb and exactly one connected headset
     3. installs the APK from the release (bsi-quest.apk, next to this script)
     4. copies your game data to the headset (about 42 GB with DLC; re-running only copies what is missing or changed)
     5. copies the Vulkan driver and the settings files to /sdcard/BSI
@@ -88,19 +88,7 @@ function Find-Game {
   Fail "BioShock Infinite not found in your Steam libraries. Pass -Game <folder that contains Binaries and XGame>."
 }
 
-# ---------------------------------------------------------------- 1. adb + headset
-Step "Headset"
-$script:Adb = Find-Adb
-Say "adb: $script:Adb"
-$devices = @(Run-Adb devices | Where-Object { $_ -match "\tdevice$" })
-if ($devices.Count -eq 0) { Fail "No headset found. Connect the Quest by USB, turn on developer mode, and accept the 'Allow USB debugging' prompt inside the headset." }
-if ($devices.Count -gt 1) { Fail "More than one adb device is connected. Disconnect the others and run again." }
-$model = (Run-Adb shell getprop ro.product.model | Select-Object -First 1).Trim()
-Say "device: $model"
-if ($model -eq "Quest 3S") { Say "NOTE: the Quest 3S has the same chip as the Quest 3 (Snapdragon XR2 Gen 2, Adreno 740), so it should work, but it has not been tested yet. Please send a play report (REPORTS.md)." }
-elseif ($model -ne "Quest 3") { Say "WARNING: this build was made and tested on a Quest 3 only (Adreno 740). '$model' has a slower GPU and is not expected to work." }
-
-# ---------------------------------------------------------------- 2. game folder
+# ---------------------------------------------------------------- 1. game folder (first: needs no headset, so the exe check works on its own)
 Step "Game folder"
 $Game = Find-Game
 $exe = Join-Path $Game "Binaries\Win32\BioShockInfinite.exe"
@@ -119,6 +107,18 @@ Say "exe: matches the supported Steam build"
 $folders = @("Binaries", "Engine", "XGame")
 if (-not $NoDLC -and (Test-Path (Join-Path $Game "DLC"))) { $folders += "DLC" }
 foreach ($f in $folders) { if (-not (Test-Path (Join-Path $Game $f))) { Fail "Game folder is incomplete: '$f' is missing." } }
+
+# ---------------------------------------------------------------- 2. adb + headset
+Step "Headset"
+$script:Adb = Find-Adb
+Say "adb: $script:Adb"
+$devices = @(Run-Adb devices | Where-Object { $_ -match "\tdevice$" })
+if ($devices.Count -eq 0) { Fail "No headset found. Connect the Quest by USB, turn on developer mode, and accept the 'Allow USB debugging' prompt inside the headset." }
+if ($devices.Count -gt 1) { Fail "More than one adb device is connected. Disconnect the others and run again." }
+$model = (Run-Adb shell getprop ro.product.model | Select-Object -First 1).Trim()
+Say "device: $model"
+if ($model -eq "Quest 3S") { Say "NOTE: the Quest 3S has the same chip as the Quest 3 (Snapdragon XR2 Gen 2, Adreno 740), so it should work, but it has not been tested yet. Please send a play report (REPORTS.md)." }
+elseif ($model -ne "Quest 3") { Say "WARNING: this build was made and tested on a Quest 3 only (Adreno 740). '$model' has a slower GPU and is not expected to work." }
 
 # ---------------------------------------------------------------- 3. release files
 Step "Release files"
