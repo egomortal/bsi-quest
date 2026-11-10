@@ -4,7 +4,7 @@
     VR    stereo 3D: you are inside the world, the HUD floats in front of you. Two views are rendered, so it is the
           heavier mode (24-49 fps depending on the area).
     Flat  the game on a big virtual screen in front of you, like a cinema. One view is rendered, so it runs
-          roughly twice as fast. Head movement does not move the camera.
+          roughly twice as fast.
 
   The mode is read when the game starts: close the game, run this, start the game again.
 

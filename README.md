@@ -49,7 +49,7 @@ Steam folder and does not delete or overwrite anything already on the headset.
 
 | Mode | What you get | Speed |
 |---|---|---|
-| **VR** (default) | Stereo 3D: you stand inside Columbia, the HUD floats in front of you, you aim with the controller | Two views are drawn, so this is the heavy mode: 24-49 fps depending on the area |
+| **VR** (default) | Stereo 3D: you stand inside Columbia, your head moves the view, the HUD floats in front of you | Two views are drawn, so this is the heavy mode: 24-49 fps depending on the area |
 | **Flat** | The game on a big virtual screen in front of you, like a private cinema | One view is drawn, so it runs roughly twice as fast |
 
 Pick one when you install (`-Mode VR` or `-Mode Flat`), and switch whenever you like:
@@ -61,6 +61,56 @@ powershell -ExecutionPolicy Bypass -File install\Set-Mode.ps1 -Mode VR
 
 Close the game first; the mode is read when it starts. Switching keeps your VR settings and your saves. An in-headset
 menu for this is on the list below; for now it is a script on the PC.
+
+## Controls
+
+The game is played with the two Touch controllers. BSI-Quest presents them to the game as an Xbox gamepad, so the game's
+own button prompts (A, B, X, Y, LB, RB, LT, RT) match what is printed on your controllers, with the grips standing in
+for the bumpers.
+
+| Touch controller | Gamepad button | In the game (default layout) |
+|---|---|---|
+| Left stick | Left stick | Move |
+| Right stick | Right stick | Turn and look |
+| Head | - | In VR, looking around with your head moves the view |
+| Right trigger | RT | Fire weapon |
+| Left trigger | LT | Use vigor (hold to charge) |
+| Right grip (squeeze firmly) | RB | Switch weapon. Hold: weapon wheel (see below) |
+| Left grip (squeeze firmly) | LB | Switch vigor. Hold: vigor wheel |
+| A (right) | A | Jump; ride and leave Sky-Lines |
+| B (right) | B | Crouch |
+| X (left) | X | Reload; hold to use, pick up, open a tear |
+| Y (left) | Y | Melee (Sky-Hook) |
+| Right stick click | RS | Aim down sights |
+| Left stick click (tap) | LS | Sprint (starts when you release the click) |
+| Menu button (left) | Start | Pause menu |
+| Meta button (right) | - | Headset system menu, as in every app |
+
+Touch controllers have no D-pad and no Back button, so the left stick click doubles as a modifier:
+
+| Hold left stick click and... | Gamepad button | In the game |
+|---|---|---|
+| push the right stick up | D-pad up | Navigation arrow |
+| push the right stick down | D-pad down | Voxophone / tear shortcut |
+| push the right stick left or right | D-pad left / right | Quick toggles |
+| press Y | Back | Objectives and map |
+| press Y and keep holding about a second | Back (held) | BSI-Quest mod menu |
+
+The view is held still while the left stick click is down.
+
+Notes:
+
+- **Grips need a firm squeeze** (85 %), so resting your hand on the controller does not switch weapons. A file
+  `/sdcard/BSI/grip.txt` containing two numbers, for example `0.7 0.5` (press at, release at), changes that.
+- **Weapon wheel** (a BSI-Quest addition, on by default): hold the right grip for about a third of a second, pick with
+  the stick, let go. Time is paused while it is open.
+- **Mod menu:** stick up/down selects, A toggles, B closes. It switches the BSI-Quest additions (weapon wheel,
+  legendary drops, economy, weapon perks, gear) on and off.
+- **Aiming:** by default the gun points where you look. Aiming with the right controller exists as an experimental
+  option: create an empty file `/sdcard/BSI/vr_aim.txt`.
+- **The actions in the right-hand column are the game's default gamepad layout.** If you pick another layout in the
+  game's options, the middle column still tells you which gamepad button each Touch control is.
+- Hand tracking is not supported for playing; use the controllers.
 
 ## Help us: play reports (opt-in)
 
