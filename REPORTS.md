@@ -26,9 +26,18 @@ rest. A report gives us three things we cannot get on our own:
 | `bsi.log` | The app's log of your **last** session: renderer setup, driver, levels loaded, frame-time lines, emulator fallbacks, errors |
 | `bench.txt`, `session.txt` | Frame-rate summary and which graphics driver was used |
 | `env.txt`, `vr_stereo.txt`, `mods.txt`, `ini_overrides.txt`, `resolution.txt` | Your BSI-Quest settings files |
+| `readmap.txt` | Only if you turned on `BSI_READMAP=1` yourself (experimental builds from 144): which blocks of which game files were read. File names and block numbers only, never file contents |
 | `device.txt` | Headset model, OS build, Android version, BSI-Quest build number |
 | `summary.txt` | A short digest of the above; the script prints it on screen before it saves anything |
 | `note.txt` | Only if you add a note describing what happened |
+
+## Optional: the read map ("what does the game actually use?")
+
+The game data is about 43 GB. We have not measured how much of it the game ever reads, and know of no published measurement. From build 144 (experimental) you
+can help find out: add the line `BSI_READMAP=1` to `/sdcard/BSI/env.txt`. The app then notes which 64 KiB blocks of each
+game file it reads, adds that up over your sessions in `/sdcard/BSI/readmap.txt`, and the report script includes the
+file. With maps from enough players covering the whole game, the installer can offer to leave never-used data off the
+headset. It is off unless you turn it on, and it records file names and block numbers only.
 
 ## What is not in a report
 

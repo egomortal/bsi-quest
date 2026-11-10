@@ -157,7 +157,8 @@ b143 (2026-11-05, chat 4 fork38): version b1n143vr. RTLOCK follows a restarted R
 b141 (2026-11-05, chat 5 CPU): version b1n141vr. Render-thread CPU trims, all exact (GPU command stream unchanged), each behind a switch (default 1, =0 = b140): C side BSI_B1_COMFAST2 / BSI_B1_IDMEMO / BSI_B1_PDFAST (+ BSI_CICACHE default 0, BSI_B1_DTSTAT default 0 = draw census off), C++ side BSI_B1_RTLOCK / BSI_B1_HOOKGATE / BSI_B1_DYNRAW / BSI_B1_ENTRYFAST. Files: src_b1n/linux rhi_b1_com.c, com.c, rt_linux.c, rhi_b1_dxvk.cpp, rhi_b1_m_ctx/objs/res/present.inc, rhi_b1_dyn.inc, rhi_b1_g4.inc. No list change. See README_B141.md.
 b142 (2026-11-05 02:00 EST): version b1n142(vr). chat 4 fork35: BSI_B1_S1CX (default 0) S1c extension: per-tap reuse of the search bits on pixels S1c rejects (window straddles a binade) where the tap's search coordinate chain is exact in fp32 (exp(fl(u+k*dz)) <= exp(u) for the x prefix, same for the row's v); =2 in-shader check u7[40..45], BSI_B1_S1CX_CTL=1 positive control. Files rhi_b1_shadoweo_pcf.h, rhi_b1_shadoweo.inc. See README_B142.md.
 b143 (2026-11-05 10:35 EST): version b1n143(vr). Build 143 = 142 + fork38: RTLOCK follows a restarted RenderingThread (BSI_B1_RTFOLLOW, default 1; 0 = b142). Fixes the Fair ~85 ms slow state (UE3 restarted RenderingThread; biased owner stale -> membarrier on every entry). File rhi_b1_dxvk.cpp. See README_B143.md.
-b143 (2026-11-05 10:35 EST): version b1n143(vr). Build 143 = 142 + fork38: RTLOCK follows a restarted RenderingThread (BSI_B1_RTFOLLOW, default 1; 0 = b142). Fixes the Fair ~85 ms slow state. File src_b1n/linux/rhi_b1_dxvk.cpp. See README_B143.md."""
+b143 (2026-11-05 10:35 EST): version b1n143(vr). Build 143 = 142 + fork38: RTLOCK follows a restarted RenderingThread (BSI_B1_RTFOLLOW, default 1; 0 = b142). Fixes the Fair ~85 ms slow state. File src_b1n/linux/rhi_b1_dxvk.cpp. See README_B143.md.
+b144 (2026-11-10 17:33): version b1n144(vr). Build 144 = 143 + BSI_READMAP (default 0 = off = b143): read map of the game files in hle_file.c. =1 (or =/path): one bit per 64 KiB block that ReadFile returned data from, per file under the game root, merged with earlier sessions, written to /sdcard/BSI/readmap.txt at most every 60 s while reads happen ([readmap] log lines). Purpose: find game data that is never read (installer trim option). I/O bookkeeping only; picture and command stream unchanged. File src_b1n/linux/hle_file.c. See README_B144.md."""
 import glob
 import argparse
 import os
@@ -222,7 +223,7 @@ def main():
     base = [clang, "--target=aarch64-linux-android29", "--sysroot=" + sysroot,
             "-resource-dir=" + resources, "-fPIC"]
     cflags = ["-O2", "-mcpu=cortex-a78c", "-g", "-w", "-Wno-error=implicit-function-declaration",
-              "-fno-strict-aliasing", "-DBSI_ANDROID", '-DBSI_VERSION="0.9.1-b1n143vr"',
+              "-fno-strict-aliasing", "-DBSI_ANDROID", '-DBSI_VERSION="0.9.1-b1n144vr"',
               "-I" + os.path.join(src, "gen"), "-I" + os.path.join(vroverlay, "linux"), "-I" + os.path.join(overlay, "linux"), "-I" + os.path.join(src, "linux"), "-I" + os.path.join(KIT, "include")]
 
     def compile_one(rel):

@@ -47,6 +47,7 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
 
 - Hands-off test lab: a PC runner installs builds over adb, loads any of about 30 checkpoints, measures per-pass GPU time and
   per-thread CPU time, and never touches the player's saves.
+- Read map (build 144, off by default): records which blocks of which game files are read, to find data that is never used.
 - In-game profiler (per-pass, per-shader GPU time; asset census), dump comparison for exactness checks.
 - Own Turnip build with KGSL fixes.
 

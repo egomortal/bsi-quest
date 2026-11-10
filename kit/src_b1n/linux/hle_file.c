@@ -82,12 +82,13 @@ static void gstrw(uint32_t p, char *out){ g2host_w(p,out,2048); }
 
 /* handle table */
 #define NH 4096
-static struct { int used, fd, vo, vfind, cat; DIR *dir; char pattern[512], dirpath[1024]; } H[NH];   /* vfind: BSI_DIRCACHE exact-name FindFirstFileW (no DIR*) */
+static struct { int used, fd, vo, vfind, cat, rm; DIR *dir; char pattern[512], dirpath[1024]; } H[NH];   /* vfind: BSI_DIRCACHE exact-name FindFirstFileW (no DIR*) */
 /* voice-stream read log (diagnosing doubled dialogue): reads of the streamed VO pack go to <BSI_VOLOG> */
 static FILE *g_volog; static int g_volog_n;
 static void volog_read(uint64_t off, uint32_t n, uint32_t dst){ if(!g_volog){ const char *p=getenv("BSI_VOLOG"); if(!p) return; g_volog=fopen(p,"w"); if(!g_volog) return; }
   if(g_volog_n++ < 20000){ struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); fprintf(g_volog,"%ld.%03ld tid %ld off %llu n %u dst %08x\n",(long)ts.tv_sec,ts.tv_nsec/1000000,(long)syscall(SYS_gettid),(unsigned long long)off,n,dst); fflush(g_volog); } }
-static uint32_t hnew(void){ for(int k=1;k<NH;k++) if(!H[k].used){ H[k].used=1; H[k].fd=-1; H[k].dir=0; H[k].vo=0; H[k].vfind=0; H[k].cat=0; return 0x1000u+4*k; } return 0xffffffffu; }
+static int rm_open(const char *h, int fd);   /* build 144: BSI_READMAP, defined above ReadFile */
+static uint32_t hnew(void){ for(int k=1;k<NH;k++) if(!H[k].used){ H[k].used=1; H[k].fd=-1; H[k].dir=0; H[k].vo=0; H[k].vfind=0; H[k].cat=0; H[k].rm=-1; return 0x1000u+4*k; } return 0xffffffffu; }
 static int hidx(uint32_t h){ if(h<0x1000u || h>=0x1000u+4*NH) return -1; int k=(h-0x1000u)/4; return H[k].used?k:-1; }
 int hle_file_close(uint32_t h){ int k=hidx(h); if(k<0) return 0; if(H[k].fd>=0) close(H[k].fd); if(H[k].dir) closedir(H[k].dir); H[k].used=0; return 1; }
 
@@ -151,14 +152,92 @@ HLE(kernel32,CreateFileW){
   if(flog) fprintf(stderr,"[file] open '%s' = %s -> %s\n",g,h,fd<0?"FAIL":"ok");
   if(fd<0){ g_last_error = errno==ENOENT?2:(errno==EEXIST?80:5); RET_STD(7,0xffffffffu); }
   if(wr || (fl&(O_CREAT|O_TRUNC))) dc_invalidate(h);   /* BSI_DIRCACHE: the listing may have changed (no-op when off) */
-  uint32_t hd=hnew(); H[(hd-0x1000)/4].fd=fd; H[(hd-0x1000)/4].vo=strstr(h,"CombinedStreaming_")!=0;
+  uint32_t hd=hnew(); H[(hd-0x1000)/4].fd=fd; H[(hd-0x1000)/4].vo=strstr(h,"CombinedStreaming_")!=0; H[(hd-0x1000)/4].rm=rm_open(h,fd);
   { size_t hl=strlen(h); H[(hd-0x1000)/4].cat=(hl>4&&!strcasecmp(h+hl-4,".tfc"))?1:(hl>4&&!strcasecmp(h+hl-4,".xxx"))?2:(hl>4&&!strcasecmp(h+hl-4,".pck"))?3:0; } g_last_error=0; if(flog) fprintf(stderr,"[file]   handle %08x\n",hd); RET_STD(7,hd);
 }
 HLE(kernel32,CreateFileA){ char g[2048], h[1024]; g2host_a(ARG(0),g,2048); g2h(g,h,0);
   if(skip_intro_movie(g,h)){ g_last_error=2; RET_STD(7,0xffffffffu); }
   uint32_t acc=ARG(1), disp=ARG(4); int wr=(acc&0x40000000u)!=0; int fl=wr?O_RDWR:O_RDONLY;
   switch(disp){ case 1: fl|=O_CREAT|O_EXCL; break; case 2: fl|=O_CREAT|O_TRUNC; break; case 4: fl|=O_CREAT; break; case 5: fl|=O_TRUNC; break; }
-  int fd=open(h,fl,0644); if(fd<0){ g_last_error=2; RET_STD(7,0xffffffffu); } if(wr || (fl&(O_CREAT|O_TRUNC))) dc_invalidate(h); uint32_t hd=hnew(); H[(hd-0x1000)/4].fd=fd; RET_STD(7,hd); }
+  int fd=open(h,fl,0644); if(fd<0){ g_last_error=2; RET_STD(7,0xffffffffu); } if(wr || (fl&(O_CREAT|O_TRUNC))) dc_invalidate(h); uint32_t hd=hnew(); H[(hd-0x1000)/4].fd=fd; H[(hd-0x1000)/4].rm=rm_open(h,fd); RET_STD(7,hd); }
+/* build 144: BSI_READMAP (default 0 = off, nothing below runs). =1: read map of the game files, to find data that is never
+   read (installer "trim" option). For every file opened under the game root, one bit per 64 KiB block that ReadFile
+   returned data from. The map is merged with the one from earlier sessions and written to /sdcard/BSI/readmap.txt
+   (BSI_READMAP=/some/path picks another file) at most every 60 s while reads happen. Text format:
+     # BSI-Quest read map v1 block=65536
+     F <file size> <blocks read> <blocks total> <path relative to the game root>
+     R <first>-<last> <first>-<last> ...        (block ranges of the F line above; omitted when nothing was read)
+   I/O bookkeeping only: the bytes the game gets, and everything it draws, are unchanged. */
+#include <pthread.h>
+#define RM_BLOCK 65536u
+#define RM_MAX 8192
+static struct { char *path; uint64_t size; uint32_t nblk, nset; uint8_t *bits; } RM[RM_MAX];
+static int rm_n, rm_on=-1, rm_dirty; static char rm_file[512]; static uint64_t rm_last; static pthread_mutex_t rm_mu=PTHREAD_MUTEX_INITIALIZER;
+static uint64_t rm_now(void){ struct timespec ts; clock_gettime(CLOCK_MONOTONIC,&ts); return (uint64_t)ts.tv_sec*1000000000ull+ts.tv_nsec; }
+static int rm_find(const char *rel, uint64_t size){   /* rm_mu held; returns the entry (new or existing), -1 when the table is full */
+  for(int i=0;i<rm_n;i++) if(!strcasecmp(RM[i].path,rel)){
+    if(RM[i].size!=size){ uint32_t nb=(uint32_t)((size+RM_BLOCK-1)/RM_BLOCK); free(RM[i].bits); RM[i].bits=calloc((nb+7)/8+1,1); RM[i].size=size; RM[i].nblk=nb; RM[i].nset=0; }   /* file changed: start over */
+    return i; }
+  if(rm_n>=RM_MAX) return -1;
+  uint32_t nb=(uint32_t)((size+RM_BLOCK-1)/RM_BLOCK);
+  RM[rm_n].path=strdup(rel); RM[rm_n].size=size; RM[rm_n].nblk=nb; RM[rm_n].nset=0; RM[rm_n].bits=calloc((nb+7)/8+1,1);
+  return rm_n++;
+}
+static void rm_set(int i, uint32_t a, uint32_t b){   /* rm_mu held; blocks a..b inclusive */
+  if(i<0 || !RM[i].bits) return; if(b>=RM[i].nblk) b=RM[i].nblk?RM[i].nblk-1:0; if(!RM[i].nblk || a>b) return;
+  for(uint32_t k=a;k<=b;k++) if(!(RM[i].bits[k>>3]&(1u<<(k&7)))){ RM[i].bits[k>>3]|=(uint8_t)(1u<<(k&7)); RM[i].nset++; rm_dirty=1; }
+}
+static void rm_load(void){   /* rm_mu held */
+  FILE *f=fopen(rm_file,"r"); if(!f) return;
+  char *ln=malloc(1<<20); int cur=-1; if(!ln){ fclose(f); return; }
+  while(fgets(ln,1<<20,f)){
+    if(ln[0]=='F'){ unsigned long long sz; unsigned a,b; int off=0; cur=-1;
+      if(sscanf(ln+1," %llu %u %u %n",&sz,&a,&b,&off)>=3 && off>0){ char *nm=ln+1+off; nm[strcspn(nm,"\r\n")]=0; if(*nm) cur=rm_find(nm,(uint64_t)sz); } }
+    else if(ln[0]=='R' && cur>=0){ char *q=ln+1; for(;;){ char *e; unsigned long a=strtoul(q,&e,10); if(e==q) break; unsigned long b=a; if(*e=='-'){ q=e+1; b=strtoul(q,&e,10); if(e==q) break; } rm_set(cur,(uint32_t)a,(uint32_t)b); q=e; } }
+  }
+  free(ln); fclose(f); rm_dirty=0;
+  fprintf(stderr,"[readmap] loaded %d files from %s\n",rm_n,rm_file);
+}
+static void rm_dump(void){   /* rm_mu held */
+  char tmp[540]; snprintf(tmp,sizeof tmp,"%s.tmp",rm_file); FILE *f=fopen(tmp,"w"); if(!f) return;
+  uint64_t tot=0, got=0;
+  fprintf(f,"# BSI-Quest read map v1 block=%u\n",RM_BLOCK);
+  for(int i=0;i<rm_n;i++){
+    fprintf(f,"F %llu %u %u %s\n",(unsigned long long)RM[i].size,RM[i].nset,RM[i].nblk,RM[i].path); tot+=RM[i].nblk; got+=RM[i].nset;
+    if(!RM[i].nset) continue;
+    fputs("R",f);
+    for(uint32_t k=0;k<RM[i].nblk;){ if(!(RM[i].bits[k>>3]&(1u<<(k&7)))){ k++; continue; }
+      uint32_t e=k; while(e+1<RM[i].nblk && (RM[i].bits[(e+1)>>3]&(1u<<((e+1)&7)))) e++;
+      if(e==k) fprintf(f," %u",k); else fprintf(f," %u-%u",k,e); k=e+1; }
+    fputs("\n",f);
+  }
+  fclose(f); rename(tmp,rm_file); rm_dirty=0;
+  fprintf(stderr,"[readmap] %d files, %.1f of %.1f MB read so far (%.1f %%) -> %s\n",rm_n,got*(RM_BLOCK/1048576.0),tot*(RM_BLOCK/1048576.0),tot?100.0*got/tot:0.0,rm_file);
+}
+static int rm_enabled(void){
+  if(rm_on>=0) return rm_on;
+  pthread_mutex_lock(&rm_mu);
+  if(rm_on<0){ const char *e=getenv("BSI_READMAP"); int on=e&&*e&&strcmp(e,"0");
+    if(on){ snprintf(rm_file,sizeof rm_file,"%s",e[0]=='/'?e:"/sdcard/BSI/readmap.txt"); rm_load(); rm_last=rm_now();
+      fprintf(stderr,"[readmap] on (BSI_READMAP): %u KiB blocks, file %s\n",RM_BLOCK/1024,rm_file); }
+    rm_on=on; }
+  pthread_mutex_unlock(&rm_mu); return rm_on;
+}
+/* called after a successful open: host path h, descriptor fd. Returns the map entry for the handle, -1 = not tracked. */
+static int rm_open(const char *h, int fd){
+  if(!rm_enabled() || !ROOT) return -1;
+  size_t rl=strlen(ROOT); if(strncmp(h,ROOT,rl) || (h[rl]!='/' && h[rl]!=0)) return -1;   /* game files only (not saves/settings) */
+  struct stat st; if(fstat(fd,&st) || !S_ISREG(st.st_mode)) return -1;
+  const char *rel=h+rl; while(*rel=='/') rel++;
+  pthread_mutex_lock(&rm_mu); int i=rm_find(rel,(uint64_t)st.st_size); if(i>=0) rm_dirty=1; pthread_mutex_unlock(&rm_mu); return i;
+}
+static void rm_read(int i, uint64_t off, ssize_t r){
+  if(i<0 || r<=0) return;
+  pthread_mutex_lock(&rm_mu);
+  rm_set(i,(uint32_t)(off/RM_BLOCK),(uint32_t)((off+(uint64_t)r-1)/RM_BLOCK));
+  if(rm_dirty){ uint64_t t=rm_now(); if(t-rm_last>=60000000000ull){ rm_last=t; rm_dump(); } }
+  pthread_mutex_unlock(&rm_mu);
+}
 void bridge_prefault(uint32_t g, uint32_t n) __attribute__((weak));
 /* test hook (notes/MOVIESKIP.md): BSI_TEST_READ_DELAY_US=<us> sleeps before every ReadFile, to make startup loading
    Quest-slow in the cloud (the startup-movie black screen only shows when loading outlasts the movies). Unset = off. */
@@ -180,8 +259,8 @@ static void io_note(int cat, ssize_t r, uint64_t ns){
 HLE(kernel32,ReadFile){ int k=hidx(ARG(0)); if(k<0){ g_last_error=6; RET_STD(5,0);} uint32_t ov=ARG(4); ssize_t r; if(bridge_prefault) bridge_prefault(ARG(1),ARG(2));
   if(g_test_read_delay){ if(g_test_read_delay<0){ const char *e=getenv("BSI_TEST_READ_DELAY_US"); g_test_read_delay=e?atoi(e):0; } if(g_test_read_delay>0) usleep(g_test_read_delay); }
   if(io_on<0){ const char *e=getenv("BSI_IOSTAT"); io_on=!(e&&atoi(e)==0); } uint64_t t0=io_on?io_now():0;
-  if(ov){ uint64_t off=(uint64_t)R32(ov+8)|((uint64_t)R32(ov+12)<<32); if(H[k].vo) volog_read(off,ARG(2),ARG(1)); r=pread(H[k].fd,MEMP(ARG(1)),ARG(2),off); W32(ov,0); W32(ov+4,r<0?0:(uint32_t)r); }
-  else { if(H[k].vo) volog_read((uint64_t)lseek(H[k].fd,0,SEEK_CUR),ARG(2),ARG(1)); r=read(H[k].fd,MEMP(ARG(1)),ARG(2)); }
+  if(ov){ uint64_t off=(uint64_t)R32(ov+8)|((uint64_t)R32(ov+12)<<32); if(H[k].vo) volog_read(off,ARG(2),ARG(1)); r=pread(H[k].fd,MEMP(ARG(1)),ARG(2),off); if(H[k].rm>=0) rm_read(H[k].rm,off,r); W32(ov,0); W32(ov+4,r<0?0:(uint32_t)r); }
+  else { if(H[k].vo) volog_read((uint64_t)lseek(H[k].fd,0,SEEK_CUR),ARG(2),ARG(1)); uint64_t rmo=H[k].rm>=0?(uint64_t)lseek(H[k].fd,0,SEEK_CUR):0; r=read(H[k].fd,MEMP(ARG(1)),ARG(2)); if(H[k].rm>=0) rm_read(H[k].rm,rmo,r); }
   if(io_on) io_note(H[k].cat,r,io_now()-t0); if(ARG(3)) W32(ARG(3),r<0?0:(uint32_t)r); RET_STD(5,r>=0); }
 HLE(kernel32,WriteFile){ int k=hidx(ARG(0)); if(k<0){ g_last_error=6; RET_STD(5,0);} ssize_t r=write(H[k].fd,MEMP(ARG(1)),ARG(2)); if(ARG(3)) W32(ARG(3),r<0?0:(uint32_t)r); RET_STD(5,r>=0); }
 HLE(kernel32,GetFileSize){ int k=hidx(ARG(0)); if(k<0) RET_STD(2,0xffffffffu); struct stat st; fstat(H[k].fd,&st); if(ARG(1)) W32(ARG(1),(uint32_t)((uint64_t)st.st_size>>32)); RET_STD(2,(uint32_t)st.st_size); }

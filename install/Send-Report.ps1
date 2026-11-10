@@ -11,6 +11,8 @@
 
   WHAT GOES INTO THE REPORT (and nothing else)
       bsi.log, bench.txt, session.txt   the app's own logs of your LAST session (technical: renderer, frame times, levels)
+      readmap.txt                       only if you turned on BSI_READMAP=1 yourself: which parts of which game FILES were
+                                        read (file names and block numbers, no file contents). Tells us what data is never used.
       env.txt, vr_stereo.txt, mods.txt, ini_overrides.txt, resolution.txt   your BSI-Quest settings files
       device.txt                        headset model, OS build, BSI-Quest build number
       summary.txt                       a short digest of the above (shown to you before anything is saved)
@@ -38,7 +40,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $Package = "com.bsiquest.game"
-$Logs    = @("bsi.log", "bench.txt", "session.txt")
+$Logs    = @("bsi.log", "bench.txt", "session.txt", "readmap.txt")
 $Config  = @("env.txt", "vr_stereo.txt", "mods.txt", "ini_overrides.txt", "resolution.txt")
 
 function Fail($t) { Write-Host ""; Write-Host "STOPPED: $t" -ForegroundColor Red; exit 1 }
@@ -162,6 +164,13 @@ foreach ($m in $order) {
 [void]$sum.Add("Untranslated game code reached (emulator fallback): $($emu.Count) address(es)")
 foreach ($k in ($emu.Keys | Sort-Object)) { [void]$sum.Add("  $k  x$($emu[$k])") }
 if ($emustat) { [void]$sum.Add("  $emustat") }
+$rmPath = Join-Path $work "readmap.txt"
+if (Test-Path $rmPath) {
+  $rmFiles = 0; $rmRead = 0.0; $rmTotal = 0.0
+  foreach ($l in Get-Content $rmPath) { if ($l -match '^F (\d+) (\d+) (\d+) ') { $rmFiles++; $rmRead += [double]$Matches[2]; $rmTotal += [double]$Matches[3] } }
+  [void]$sum.Add("")
+  [void]$sum.Add(("Read map (BSI_READMAP): {0} game files opened, {1:N1} of {2:N1} GB read in them, over all sessions so far" -f $rmFiles, ($rmRead * 65536 / 1GB), ($rmTotal * 65536 / 1GB)))
+}
 [void]$sum.Add("")
 if ($crash.Count) { [void]$sum.Add("Crash:"); foreach ($c in $crash) { [void]$sum.Add("  $c") } } else { [void]$sum.Add("Crash: none found in the log") }
 if ($Note) { [void]$sum.Add(""); [void]$sum.Add("Note from the player: $Note"); Set-Content -Path (Join-Path $work "note.txt") -Value $Note -Encoding ascii }

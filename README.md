@@ -100,10 +100,12 @@ In order:
 2. **One pass for both eyes** (single-pass stereo). Today every draw is issued twice; this is the main render-thread lever.
 3. **Translate the rest of the game code.** Play reports (see above) tell us which code players reach that the
    translator has not seen. When reports come back empty, the fallback emulator is removed.
-4. **Build from your own copy in one command.** `PIPELINE.md` lists the stages and the gaps; `setup.py` reports which
+4. **A smaller install.** Build 144 can record which parts of the 43 GB of game data are ever read (`REPORTS.md`).
+   Once maps cover the whole game, the installer can leave unused data off the headset.
+5. **Build from your own copy in one command.** `PIPELINE.md` lists the stages and the gaps; `setup.py` reports which
    stages are ready on your PC.
-5. **Anti-aliasing without TAA**, once the frame rate is there.
-6. **Gameplay mods** (gear, weapon wheel, new enemy variants), after the VR goal is met.
+6. **Anti-aliasing without TAA**, once the frame rate is there.
+7. **Gameplay mods** (gear, weapon wheel, new enemy variants), after the VR goal is met.
 
 ## Contributing
 
