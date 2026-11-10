@@ -18,9 +18,14 @@ is reported as unavailable.
 |---|---|
 | Headset | Meta Quest 3 (Quest 3S: same chip, untested) |
 | Free space on the headset | about **45 GB** with the DLC, about **20 GB** without |
-| Game | BioShock Infinite, Steam version, installed on your PC (about 43 GB on the PC with DLC) |
+| Game | BioShock Infinite, **Steam version only**, installed on your PC (about 43 GB on the PC with DLC) |
 | PC | Windows, with adb (SideQuest includes it) and a USB cable |
 | Headset setting | Developer mode on |
+
+**GOG and Epic copies are not supported yet.** The app is made from the Steam version's `BioShockInfinite.exe` and needs
+that exact file. If you own the game on GOG or Epic, you can help us find out what it would take: run the installer with
+`-Game <your game folder> -DryRun`. It will stop and print your exe's SHA-256 fingerprint; open an issue with that line
+and the store you bought it from. Please send only the fingerprint, never the file.
 
 ## Install (Windows PC + Quest 3)
 

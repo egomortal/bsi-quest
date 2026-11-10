@@ -110,7 +110,9 @@ $hash = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
 if ($hash -ne $ExeSha256) {
   Fail ("Your BioShockInfinite.exe is a different build than the one this app was made from.`n" +
         "  yours:    $hash`n  expected: $ExeSha256`n" +
-        "Use the current Steam version of the game (verify the game files in Steam), then run again.")
+        "Steam copy: verify the game files in Steam, then run again.`n" +
+        "GOG or Epic copy: not supported yet. Please open an issue on the project page with the 'yours' line above and the`n" +
+        "store you bought it from (only that line, never the file), so we can find out what supporting it would take.")
 }
 Say "exe: matches the supported Steam build"
 
