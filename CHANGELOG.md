@@ -43,6 +43,11 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
 
 - Two display modes, chosen at install and switchable later: VR (stereo) and Flat (big virtual screen, one view).
 - One-script install from a Windows PC: checks the game build, installs the app, copies game data, driver and settings.
+  One-zip download with double-click starters (`Install.bat`, `Switch-Mode.bat`, `Send-Report.bat`).
+- Fixed after the first real install (11 Nov 2026): on a fresh install the copy failed with `secure_mkdirs failed:
+  Operation not permitted`, because only the headset may create the app's data folder and it does so on the app's first
+  start. The installer now opens the app once first. It also finds adb where newer SideQuest keeps it
+  (`%APPDATA%\SideQuest\platform-tools`). README "If the install stops" has the manual fix for older downloads.
 
 ## Tooling
 

@@ -53,6 +53,57 @@ The script checks that your `BioShockInfinite.exe` is the build the app was made
 (re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
 Steam folder and does not delete or overwrite anything already on the headset.
 
+### If the install stops
+
+Every fix below is safe to try: re-running the installer skips what is already done and never touches your saves
+(they are in `/sdcard/BSI/user` on the headset).
+
+**`remote secure_mkdirs failed: Operation not permitted`** while copying game data (usually at
+`ApexFrameworkSHIPPING_x86.dll`)
+
+*Why:* the game data goes into the app's own folder on the headset, `/sdcard/Android/data/com.bsiquest.game`. On the
+Quest (Android 12 and newer) only the headset itself may create that folder, and it does so the first time the app is
+opened. After a fresh install the app has never been opened, so the PC is not allowed to create the folder. Installers
+downloaded before 11 Nov 2026 did not know this. This was found on the first real install by a player: thank you.
+
+*Fix:* download the current `BSI-Quest-Installer.zip` from the release (or the current repository) and run it again: it
+now opens the app once by itself so the headset creates the folder. With the old installer, or if it still fails:
+
+1. Put the headset on, open **BSI Quest** once from Unknown Sources in your app library, and close it again (it may show
+   nothing or close by itself; that is fine).
+2. Run the installer again.
+
+If the same error comes back after that, remove the app and install again. This only removes the app and its own
+folder; your saves and settings in `/sdcard/BSI` stay:
+
+```
+adb uninstall com.bsiquest.game
+```
+
+**`adb not found`**
+
+*Why:* newer versions of SideQuest keep adb in `%APPDATA%\SideQuest\platform-tools`, where installers from before
+11 Nov 2026 did not look. *Fix:* use the current installer, or tell the old one where adb is:
+
+```
+powershell -ExecutionPolicy Bypass -File install\Install-BSIQuest.ps1 -Adb "%APPDATA%\SideQuest\platform-tools\adb.exe"
+```
+
+(In a PowerShell window write `$env:APPDATA` instead of `%APPDATA%`.)
+
+**`The argument 'install\Install-BSIQuest.ps1' to the -File parameter does not exist`**
+
+*Why:* the command was run from another folder (a new PowerShell window starts in `C:\WINDOWS\system32`). *Fix:*
+double-click `Install.bat` instead, or first go to the folder you unzipped, for example
+`cd "$env:USERPROFILE\Desktop\bsi-quest-main"`, then run the command.
+
+**`No headset found`** or **`More than one adb device`**
+
+Unplug and replug the USB cable, put the headset on and accept "Allow USB debugging" (tick "Always allow"). Close
+SideQuest's wireless connection or any emulator, so that only the headset is connected.
+
+**Anything else:** open an issue and paste the whole text of the installer window.
+
 ## Two ways to play: VR or Flat
 
 | Mode | What you get | Speed |
