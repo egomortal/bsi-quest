@@ -163,7 +163,16 @@ if ($DryRun) {
 # ---------------------------------------------------------------- 4. install
 Step "Installing the app"
 Run-Adb shell am force-stop $Package | Out-Null
-Run-Adb install -r $Apk | ForEach-Object { Say $_ }
+Run-Adb install -r -g $Apk | ForEach-Object { Say $_ }
+# The app has no Java code to ask for storage access, and it reads its settings, driver and (on newer headsets) the game
+# from /sdcard/BSI. Grant that here: without it the app cannot see /sdcard/BSI and stops at start.
+$ErrorActionPreference = "Continue"
+foreach ($p in "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE") { & $script:Adb shell pm grant $Package "android.permission.$p" 2>&1 | Out-Null }
+& $script:Adb shell appops set $Package MANAGE_EXTERNAL_STORAGE allow 2>&1 | Out-Null
+$ErrorActionPreference = "Stop"
+$perm = "$(& $script:Adb shell appops get $Package MANAGE_EXTERNAL_STORAGE 2>&1)"
+if ($perm -match "allow") { Say "storage access: granted" }
+else { Say "WARNING: could not grant storage access ($perm). If the game stops at start: Settings > Apps > BSI Quest > Permissions > allow file access." }
 
 # ---------------------------------------------------------------- 5. game data
 function Test-AppDir {

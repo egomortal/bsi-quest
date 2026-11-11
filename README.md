@@ -70,6 +70,16 @@ app's folder, it now copies the game to `/sdcard/BSI/BioShock Infinite` instead,
 else to do: no need to open the app first or to uninstall. Game data in that folder stays when the app is uninstalled
 (delete the folder yourself with a file manager if you want the space back).
 
+**The game closes right after starting, or shows nothing** (after an install that finished)
+
+*Why:* the app reads its settings, the driver and the game from `/sdcard/BSI`, which needs "all files" storage access.
+The app cannot ask for it by itself, and installers downloaded before 12 Nov 2026 did not grant it. *Fix:* run the
+current installer again (it grants it and skips everything already copied), or grant it by hand:
+
+```
+adb shell appops set com.bsiquest.game MANAGE_EXTERNAL_STORAGE allow
+```
+
 **`adb not found`**
 
 *Why:* newer versions of SideQuest keep adb in `%APPDATA%\SideQuest\platform-tools`, where installers from before
