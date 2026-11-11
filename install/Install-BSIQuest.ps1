@@ -6,6 +6,7 @@
     2. finds adb and exactly one connected headset
     3. installs the APK from the release (bsi-quest.apk, next to this script)
     4. copies your game data to the headset (about 42 GB with DLC; re-running only copies what is missing or changed)
+       into the app's own folder, or into /sdcard/BSI/BioShock Infinite if the headset does not let adb write there
     5. copies the Vulkan driver and the settings files to /sdcard/BSI
 
   It never changes your Steam folder, never deletes anything on the headset, and keeps settings files that are already there
@@ -35,6 +36,9 @@ $ExeSha256 = "c20a42529c4181b1d10eed416d9847a823f9453dd267ca478efb3a10014a0e77"
 $Package   = "com.bsiquest.game"
 $GameDst   = "/sdcard/Android/data/$Package/files/game"
 $CfgDst    = "/sdcard/BSI"
+# Second place the app looks for the game (android_glue.c): used when the headset will not let adb write into the app's
+# own folder. Reads there go through Android's storage layer, so loading can be a little slower.
+$GameAlt   = "$CfgDst/BioShock Infinite"
 $CfgSrc    = Join-Path $PSScriptRoot "config"
 
 function Say($t)  { Write-Host $t }
@@ -134,8 +138,10 @@ if (-not $SkipGameData) {
   $need = 0
   foreach ($f in $folders) { $need += (Get-ChildItem -Path (Join-Path $Game $f) -Recurse -File | Measure-Object Length -Sum).Sum }
   $have = 0
-  $du = Run-Adb shell "du -sk $GameDst 2>/dev/null || echo 0"
-  if ("$du" -match "^(\d+)") { $have = [int64]$Matches[1] * 1024 }
+  foreach ($d in $GameDst, $GameAlt) {
+    $du = Run-Adb shell "du -sk '$d' 2>/dev/null || echo 0"
+    if ("$du" -match "^(\d+)") { $have += [int64]$Matches[1] * 1024 }
+  }
   $df = Run-Adb shell "df -k /sdcard" | Select-Object -Last 1
   $free = 0
   if ($df -match "^\S+\s+\d+\s+\d+\s+(\d+)") { $free = [int64]$Matches[1] * 1024 }
@@ -148,7 +154,7 @@ if (-not $SkipGameData) {
 if ($DryRun) {
   Step "Dry run: nothing was changed. A real run would"
   Say "  install $Apk"
-  if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst") }
+  if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst (or to $GameAlt if the headset does not let adb write there)") }
   Say "  copy the driver to $CfgDst/turnip/ and the settings in $CfgSrc to $CfgDst"
   Say "  set the display mode to $Mode (VR = stereo 3D, Flat = big virtual screen)"
   exit 0
@@ -165,29 +171,51 @@ function Test-AppDir {
   $o = & $script:Adb shell "ls -d /sdcard/Android/data/$Package/files 2>/dev/null" 2>&1 | ForEach-Object { "$_" }
   return ("$o" -match "/files")
 }
+function Test-AdbCanWrite([string]$dir) {
+  # adb push creates folders itself (adbd "secure_mkdirs"); some headsets refuse that inside Android/data even when
+  # "adb shell mkdir" works. Push a tiny file into a new subfolder to find out, then remove only that probe.
+  $ErrorActionPreference = "Continue"
+  $tmp = Join-Path $env:TEMP "bsi_probe.txt"
+  Set-Content -Path $tmp -Value "probe written by Install-BSIQuest.ps1" -Encoding ascii
+  & $script:Adb shell "mkdir -p '$dir'" 2>&1 | Out-Null
+  $o = & $script:Adb push $tmp "$dir/.bsi_probe/probe.txt" 2>&1 | ForEach-Object { "$_" }
+  $ok = ($LASTEXITCODE -eq 0)
+  & $script:Adb shell "rm -f '$dir/.bsi_probe/probe.txt'; rmdir '$dir/.bsi_probe'" 2>&1 | Out-Null
+  Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
+  if (-not $ok) { Say ("  adb cannot write to $dir`n  " + ($o -join "`n  ")) }
+  return $ok
+}
 if (-not $SkipGameData) {
-  # Android 11+ lets only the system create /sdcard/Android/data/<app>; it does so the first time the app starts.
-  # adb cannot create it ("secure_mkdirs failed: Operation not permitted"), so start the app once and wait for it.
-  if (-not (Test-AppDir)) {
-    Step "Starting the app once so the headset creates its data folder"
-    $ErrorActionPreference = "Continue"
-    & $script:Adb shell am start -W -n "$Package/android.app.NativeActivity" 2>&1 | Out-Null
-    $ErrorActionPreference = "Stop"
-    $ok = $false
-    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep -Seconds 1; $ok = Test-AppDir }
-    Run-Adb shell am force-stop $Package | Out-Null
-    if (-not $ok) {
-      Fail ("The headset did not create the app's data folder.`n" +
-            "Put the headset on, open 'BSI Quest' once from Unknown Sources in your app library, close it,`n" +
-            "then run this installer again (it skips what is already done).")
+  $target = $GameDst
+  # A copy already started in the fallback folder (earlier run): keep using it.
+  $altExe = & $script:Adb shell "ls '$GameAlt/Binaries' 2>/dev/null" 2>&1 | ForEach-Object { "$_" }
+  if ("$altExe" -match "Win32") { $target = $GameAlt }
+  else {
+    # Android 11+ lets only the system create /sdcard/Android/data/<app>; it does so the first time the app starts.
+    # adb cannot create it ("secure_mkdirs failed: Operation not permitted"), so start the app once and wait for it.
+    if (-not (Test-AppDir)) {
+      Step "Starting the app once so the headset creates its data folder"
+      $ErrorActionPreference = "Continue"
+      & $script:Adb shell am start -W -n "$Package/android.app.NativeActivity" 2>&1 | Out-Null
+      $ErrorActionPreference = "Stop"
+      $ok = $false
+      for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep -Seconds 1; $ok = Test-AppDir }
+      Run-Adb shell am force-stop $Package | Out-Null
+      if ($ok) { Say "data folder created" }
     }
-    Say "data folder created"
+    if (-not (Test-AppDir) -or -not (Test-AdbCanWrite $GameDst)) {
+      Say "This headset does not let adb write into the app's own folder. Using $GameAlt instead (the app finds it there)."
+      $target = $GameAlt
+    }
   }
-  Step "Copying game data (this takes a long time the first time; safe to re-run if it is interrupted)"
-  Run-Adb shell mkdir -p $GameDst | Out-Null
+  if ($target -eq $GameAlt -and -not (Test-AdbCanWrite $GameAlt)) {
+    Fail "adb cannot write to $GameAlt either. Unplug and replug the cable, accept 'Allow USB debugging' in the headset, and run again."
+  }
+  Step "Copying game data to $target (this takes a long time the first time; safe to re-run if it is interrupted)"
+  Run-Adb shell "mkdir -p '$target'" | Out-Null
   foreach ($f in $folders) {
     Say "-> $f"
-    $ErrorActionPreference = "Continue"; & $script:Adb push --sync (Join-Path $Game $f) "$GameDst/"; $ErrorActionPreference = "Stop"
+    $ErrorActionPreference = "Continue"; & $script:Adb push --sync (Join-Path $Game $f) "$target/"; $ErrorActionPreference = "Stop"
     if ($LASTEXITCODE -ne 0) { Fail "Copying '$f' failed. Check the cable and run the script again; it continues where it stopped." }
   }
 }

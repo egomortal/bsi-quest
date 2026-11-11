@@ -58,27 +58,17 @@ Steam folder and does not delete or overwrite anything already on the headset.
 Every fix below is safe to try: re-running the installer skips what is already done and never touches your saves
 (they are in `/sdcard/BSI/user` on the headset).
 
-**`remote secure_mkdirs failed: Operation not permitted`** while copying game data (usually at
-`ApexFrameworkSHIPPING_x86.dll`)
+**`remote secure_mkdirs failed: Operation not permitted`** while copying game data (at any file, for example
+`ApexFrameworkSHIPPING_x86.dll` or `vcredist_x86_vs2008sp1.exe`)
 
-*Why:* the game data goes into the app's own folder on the headset, `/sdcard/Android/data/com.bsiquest.game`. On the
-Quest (Android 12 and newer) only the headset itself may create that folder, and it does so the first time the app is
-opened. After a fresh install the app has never been opened, so the PC is not allowed to create the folder. Installers
-downloaded before 11 Nov 2026 did not know this. This was found on the first real install by a player: thank you.
+*Why:* the installer first tries the app's own folder on the headset, `/sdcard/Android/data/com.bsiquest.game`. Current
+Quest system software does not let adb create folders there at all, even after the app has been opened once. Installers
+downloaded before 12 Nov 2026 had no way around this. Found by the first players to install: thank you.
 
-*Fix:* download the current `BSI-Quest-Installer.zip` from the release (or the current repository) and run it again: it
-now opens the app once by itself so the headset creates the folder. With the old installer, or if it still fails:
-
-1. Put the headset on, open **BSI Quest** once from Unknown Sources in your app library, and close it again (it may show
-   nothing or close by itself; that is fine).
-2. Run the installer again.
-
-If the same error comes back after that, remove the app and install again. This only removes the app and its own
-folder; your saves and settings in `/sdcard/BSI` stay:
-
-```
-adb uninstall com.bsiquest.game
-```
+*Fix:* download the current `BSI-Quest-Installer.zip` from the release and run it again. When the headset refuses the
+app's folder, it now copies the game to `/sdcard/BSI/BioShock Infinite` instead, which the app finds by itself. Nothing
+else to do: no need to open the app first or to uninstall. Game data in that folder stays when the app is uninstalled
+(delete the folder yourself with a file manager if you want the space back).
 
 **`adb not found`**
 
