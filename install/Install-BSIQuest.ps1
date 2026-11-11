@@ -231,6 +231,31 @@ function New-RemoteDirs([string]$local, [string]$remote) {
     Run-Adb shell ("mkdir -p " + ($batch -join " ")) | Out-Null
   }
 }
+function Test-AppCanRead {
+  # On some headsets the app is not allowed to read files that adb put into its own folder (first player install: the
+  # app's log said "app-folder read test ... FAILED Permission denied", found no game and stayed black). Ask the app
+  # itself: put readtest.txt there, start the app once, and read the line it writes to /sdcard/BSI/bsi.log at start.
+  # Returns "OK", "FAILED" or "unknown".
+  $ErrorActionPreference = "Continue"
+  $tmp = Join-Path $env:TEMP "bsi_readtest.txt"
+  Set-Content -Path $tmp -Value "readable" -Encoding ascii
+  & $script:Adb shell "mkdir -p '$GameDst'" 2>&1 | Out-Null
+  & $script:Adb push $tmp "$GameDst/readtest.txt" 2>&1 | Out-Null
+  Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
+  $before = "$(& $script:Adb shell "stat -c %Y $CfgDst/bsi.log 2>/dev/null" 2>&1)".Trim()
+  & $script:Adb shell am force-stop $Package 2>&1 | Out-Null
+  & $script:Adb shell am start -n "$Package/android.app.NativeActivity" 2>&1 | Out-Null
+  $result = "unknown"
+  for ($i = 0; $i -lt 40 -and $result -eq "unknown"; $i++) {
+    Start-Sleep -Seconds 1
+    $now = "$(& $script:Adb shell "stat -c %Y $CfgDst/bsi.log 2>/dev/null" 2>&1)".Trim()
+    if ($now -eq $before) { continue }
+    $line = "$(& $script:Adb shell "grep -m1 'app-folder read test' $CfgDst/bsi.log" 2>&1)"
+    if ($line -match "read test .*: OK") { $result = "OK" } elseif ($line -match "read test .*: FAILED") { $result = "FAILED" }
+  }
+  & $script:Adb shell am force-stop $Package 2>&1 | Out-Null
+  return $result
+}
 if (-not $SkipGameData) {
   $target = $GameDst
   # A copy already started in the fallback folder (earlier run): keep using it.
@@ -252,6 +277,28 @@ if (-not $SkipGameData) {
     if (-not (Test-AppDir) -or -not (Test-AdbCanWrite $GameDst)) {
       Say "This headset does not let adb write into the app's own folder. Using $GameAlt instead (the app finds it there)."
       $target = $GameAlt
+    }
+    else {
+      Step "Checking that the app can read its own folder (starts the app for a few seconds)"
+      $read = Test-AppCanRead
+      if ($read -eq "OK") { Say "the app can read its folder" }
+      elseif ($read -eq "unknown") { Say "WARNING: could not check (the app did not write its log in time). Copying to $GameDst anyway." }
+      else {
+        Say "This headset does not let the app read files copied into its own folder. Using $GameAlt instead (the app finds it there)."
+        $target = $GameAlt
+        # Game data already copied there by an earlier run: move it on the headset instead of copying 42 GB again.
+        Run-Adb shell "mkdir -p '$GameAlt'" | Out-Null
+        foreach ($f in $folders) {
+          $ErrorActionPreference = "Continue"
+          $src = "$(& $script:Adb shell "ls -d '$GameDst/$f' 2>/dev/null" 2>&1)"
+          $dst = "$(& $script:Adb shell "ls -d '$GameAlt/$f' 2>/dev/null" 2>&1)"
+          $ErrorActionPreference = "Stop"
+          if ($src -match "/$f" -and -not ($dst -match "/$f")) {
+            Say "moving $f from the app's folder to $GameAlt on the headset (can take several minutes)"
+            Run-Adb shell "mv '$GameDst/$f' '$GameAlt/$f'" | Out-Null
+          }
+        }
+      }
     }
   }
   if ($target -eq $GameAlt -and -not (Test-AdbCanWrite $GameAlt)) {

@@ -70,6 +70,14 @@ first and then copies into them, which the headset allows. No need to open the a
 refuses even that, the installer says so and copies the game to `/sdcard/BSI/BioShock Infinite` instead, which the app
 also finds by itself (that folder stays when the app is uninstalled; delete it with a file manager to get the space back).
 
+**Black screen after an install that said `Done`**, and the log (`Send-Report.bat`) says
+`app-folder read test ... FAILED Permission denied` and `game folder missing`
+
+*Why:* on some headsets the app is not allowed to read the game files the installer copied into its own folder, so it
+finds no game. Installers downloaded before 12 Nov 2026 did not check this. *Fix:* run the current installer again. It
+now starts the app for a few seconds to ask whether it can read its folder; if not, it moves the game on the headset to
+`/sdcard/BSI/BioShock Infinite` (no new copy from the PC), where the app can read it.
+
 **The game closes right after starting, or shows nothing** (after an install that finished)
 
 *Why:* the app reads its settings, the driver and the game from `/sdcard/BSI`, which needs "all files" storage access.
