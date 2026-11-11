@@ -33,13 +33,15 @@ and the store you bought it from. Please send only the fingerprint, never the fi
 2. Turn on developer mode on the Quest, connect it by USB and accept the debugging prompt. Install SideQuest if you have no adb.
 3. Download `BSI-Quest-Installer.zip` from the stable release ("Latest") on the Releases page and unzip it. It holds the
    app, the driver, the settings and the installer in one folder.
-4. Double-click `Install.bat` in the unzipped folder. It asks what to do (install, update settings only, or test
+4. Double-click `Install.bat` in the unzipped folder. It asks what to do (install, most optimized settings, or test
    only), then VR or Flat and DLC or not, and does the rest. If it cannot find your game, drag your `BioShock Infinite`
    folder onto `Install.bat`.
 
-**After a new installer comes out** (new settings, for example GTAO), double-click `Install.bat` and choose
-**U = update settings only**: it adds the new settings files in a few seconds, without checking the game or copying
-anything, and keeps your settings and your VR/Flat mode.
+**After every new installer, choose U = most optimized settings (highly recommended).** Double-click `Install.bat`
+and pick **U**: in a few seconds it brings every recommended setting on the headset up to date (for example GTAO),
+without checking the game or copying it. Changed files are replaced and your old copy is kept as `<name>.bak`; your mod
+menu choices, your Flat screen size and your VR/Flat mode are kept. `install/SETTINGS.md` lists every setting we use and
+what it does.
 
 To remove it again, double-click `Uninstall.bat`: it removes the app and the game data in its folder and keeps your
 saves and settings in `/sdcard/BSI`.

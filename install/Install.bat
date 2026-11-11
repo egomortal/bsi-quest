@@ -29,7 +29,13 @@ if not exist "%~dp0Install-BSIQuest.ps1" (
   exit /b 1
 )
 
-choice /c IUT /n /m " I = install (or update everything), U = update settings only (fast: no game copy), T = test only  [I/U/T]: "
+echo  I = install (or update everything)
+echo  U = most optimized settings: brings your settings up to date. HIGHLY RECOMMENDED
+echo      after every new installer. Takes seconds, no game copy; keeps your mod choices
+echo      and VR/Flat mode, and saves your old files as .bak. SETTINGS.md lists them all.
+echo  T = test only (shows what would happen, changes nothing)
+echo.
+choice /c IUT /n /m " Your choice  [I/U/T]: "
 if errorlevel 3 (set "BSI_ACT=T") else if errorlevel 2 (set "BSI_ACT=U") else (set "BSI_ACT=I")
 echo.
 if "%BSI_ACT%"=="U" (

@@ -194,10 +194,27 @@ Run-Adb shell mkdir -p "$CfgDst/turnip" | Out-Null
 Run-Adb push $Driver "$CfgDst/turnip/vulkan.ad07xx.so" | Out-Null
 Say "driver copied"
 $existing = @(Run-Adb shell ls $CfgDst)
+# -SettingsOnly ("U = most optimized settings" in Install.bat) brings every recommended setting up to date: files that
+# differ are replaced, the old one is kept as <name>.bak. Personal files (the mod menu's choices, the Flat screen size)
+# are never replaced, and the VR/Flat mode stays as it is (in Flat mode vr_stereo.txt is stored as vr_stereo.txt.off).
+$Personal = @("mods.txt", "resolution.txt")
 foreach ($file in Get-ChildItem -Path $CfgSrc -File) {
-  if (($existing -contains $file.Name) -and -not $ResetSettings) { Say "kept     $($file.Name) (already on the headset)"; continue }
-  Run-Adb push $file.FullName "$CfgDst/$($file.Name)" | Out-Null
-  Say "copied   $($file.Name)"
+  $name = $file.Name
+  if ($name -eq "vr_stereo.txt" -and -not ($existing -contains $name) -and ($existing -contains "vr_stereo.txt.off")) { $name = "vr_stereo.txt.off" }
+  if ($existing -contains $name) {
+    $update = $ResetSettings -or ($SettingsOnly -and ($Personal -notcontains $file.Name))
+    if (-not $update) { Say "kept     $name (already on the headset)"; continue }
+    $ErrorActionPreference = "Continue"
+    $theirs = "$(& $script:Adb shell "md5sum '$CfgDst/$name'" 2>&1)"
+    $ErrorActionPreference = "Stop"
+    if ($theirs -match "^([0-9a-f]{32})" -and $Matches[1] -eq (Get-FileHash -Algorithm MD5 $file.FullName).Hash.ToLower()) { Say "same     $name (already the recommended one)"; continue }
+    Run-Adb shell "cp '$CfgDst/$name' '$CfgDst/$name.bak'" | Out-Null
+    Run-Adb push $file.FullName "$CfgDst/$name" | Out-Null
+    Say "updated  $name (your old one: $name.bak)"
+    continue
+  }
+  Run-Adb push $file.FullName "$CfgDst/$name" | Out-Null
+  Say "copied   $name"
 }
 # Settings folders (config\ao\gtao_match = GTAO ambient occlusion, selected by ao_sel.txt = 3): same rule, file by file.
 $cfgRoot = (Get-Item -LiteralPath $CfgSrc).FullName
@@ -207,7 +224,7 @@ foreach ($file in Get-ChildItem -Path $cfgRoot -File -Recurse | Where-Object { $
   $ErrorActionPreference = "Continue"
   $there = "$(& $script:Adb shell "ls '$remote' 2>/dev/null" 2>&1)"
   $ErrorActionPreference = "Stop"
-  if (($there -match [regex]::Escape($file.Name)) -and -not $ResetSettings) { Say "kept     $rel (already on the headset)"; continue }
+  if (($there -match [regex]::Escape($file.Name)) -and -not ($ResetSettings -or $SettingsOnly)) { Say "kept     $rel (already on the headset)"; continue }
   Run-Adb shell "mkdir -p '$($remote.Substring(0, $remote.LastIndexOf('/')))'" | Out-Null
   Run-Adb push $file.FullName $remote | Out-Null
   Say "copied   $rel"
