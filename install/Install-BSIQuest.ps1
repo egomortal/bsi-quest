@@ -18,6 +18,7 @@
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -Game "D:\SteamLibrary\steamapps\common\BioShock Infinite" -NoDLC
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -DryRun      # show what would happen, change nothing
     powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -Mode Flat   # big-screen mode instead of VR (Set-Mode.ps1 switches later)
+    powershell -ExecutionPolicy Bypass -File Install-BSIQuest.ps1 -SettingsOnly   # after an update: add new settings files only (keeps the VR/Flat mode)
 #>
 param(
   [string]$Game = "",
@@ -27,6 +28,7 @@ param(
   [ValidateSet("VR", "Flat")][string]$Mode = "VR",
   [switch]$NoDLC,
   [switch]$SkipGameData,
+  [switch]$SettingsOnly,   # only the driver, settings and storage access: no game check, no app install, no game copy
   [switch]$ResetSettings,
   [switch]$DryRun
 )
@@ -95,6 +97,7 @@ function Find-Game {
 }
 
 # ---------------------------------------------------------------- 1. game folder (first: needs no headset, so the exe check works on its own)
+if ($SettingsOnly) { $SkipGameData = $true } else {
 Step "Game folder"
 $Game = Find-Game
 $exe = Join-Path $Game "Binaries\Win32\BioShockInfinite.exe"
@@ -113,6 +116,7 @@ Say "exe: matches the supported Steam build"
 $folders = @("Binaries", "Engine", "XGame")
 if (-not $NoDLC -and (Test-Path (Join-Path $Game "DLC"))) { $folders += "DLC" }
 foreach ($f in $folders) { if (-not (Test-Path (Join-Path $Game $f))) { Fail "Game folder is incomplete: '$f' is missing." } }
+}
 
 # ---------------------------------------------------------------- 2. adb + headset
 Step "Headset"
@@ -128,10 +132,10 @@ elseif ($model -ne "Quest 3") { Say "WARNING: this build was made and tested on 
 
 # ---------------------------------------------------------------- 3. release files
 Step "Release files"
-if (-not (Test-Path $Apk))    { Fail "APK not found: $Apk`nDownload bsi-quest.apk from the Releases page and put it next to this script." }
+if (-not $SettingsOnly -and -not (Test-Path $Apk)) { Fail "APK not found: $Apk`nDownload bsi-quest.apk from the Releases page and put it next to this script." }
 if (-not (Test-Path $Driver)) { Fail "Driver not found: $Driver`nDownload vulkan.ad07xx.so from the Releases page and put it next to this script." }
 if (-not (Test-Path $CfgSrc)) { Fail "Settings folder not found: $CfgSrc" }
-Say ("apk:    {0} ({1:N1} MB)" -f $Apk, ((Get-Item $Apk).Length / 1MB))
+if (-not $SettingsOnly) { Say ("apk:    {0} ({1:N1} MB)" -f $Apk, ((Get-Item $Apk).Length / 1MB)) }
 Say ("driver: {0} ({1:N1} MB)" -f $Driver, ((Get-Item $Driver).Length / 1MB))
 
 # ---------------------------------------------------------------- space check
@@ -154,17 +158,26 @@ if (-not $SkipGameData) {
 
 if ($DryRun) {
   Step "Dry run: nothing was changed. A real run would"
-  Say "  install $Apk"
-  Say "  copy the driver to $CfgDst/turnip/ and the settings in $CfgSrc to $CfgDst"
-  Say "  set the display mode to $Mode (VR = stereo 3D, Flat = big virtual screen)"
+  if (-not $SettingsOnly) { Say "  install $Apk" }
+  Say "  copy the driver to $CfgDst/turnip/ and the settings in $CfgSrc to $CfgDst (settings already there are kept)"
+  if (-not $SettingsOnly) { Say "  set the display mode to $Mode (VR = stereo 3D, Flat = big virtual screen)" }
   if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst (or to $GameAlt if the headset does not let adb write there)") }
   exit 0
 }
 
 # ---------------------------------------------------------------- 4. install
+if ($SettingsOnly) {
+  $ErrorActionPreference = "Continue"
+  $isIn = "$(& $script:Adb shell pm list packages $Package 2>&1)"
+  $ErrorActionPreference = "Stop"
+  if (-not ($isIn -match "package:$Package")) { Fail "The app is not installed on this headset. Run the full install (I) instead." }
+  Step "Settings update (the app and the game data are left as they are)"
+  Run-Adb shell am force-stop $Package | Out-Null
+} else {
 Step "Installing the app"
 Run-Adb shell am force-stop $Package | Out-Null
 Run-Adb install -r -g $Apk | ForEach-Object { Say $_ }
+}
 # The app has no Java code to ask for storage access, and it reads its settings, driver and (on newer headsets) the game
 # from /sdcard/BSI. Grant that here: without it the app cannot see /sdcard/BSI and stops at start.
 $ErrorActionPreference = "Continue"
@@ -209,9 +222,11 @@ if (-not ($existing -contains "bsi.log")) {
 }
 
 # ---------------------------------------------------------------- 6. display mode
+if (-not $SettingsOnly) {
 Step "Display mode: $Mode"
 & (Join-Path $PSScriptRoot "Set-Mode.ps1") -Mode $Mode -Adb $script:Adb
 if ($LASTEXITCODE -ne 0) { Fail "Could not set the display mode. Run install\Set-Mode.ps1 -Mode $Mode yourself." }
+}
 
 # ---------------------------------------------------------------- 7. game data
 function Test-AppDir {

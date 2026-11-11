@@ -29,14 +29,21 @@ if not exist "%~dp0Install-BSIQuest.ps1" (
   exit /b 1
 )
 
+choice /c IUT /n /m " I = install (or update everything), U = update settings only (fast: no game copy), T = test only  [I/U/T]: "
+if errorlevel 3 (set "BSI_ACT=T") else if errorlevel 2 (set "BSI_ACT=U") else (set "BSI_ACT=I")
+echo.
+if "%BSI_ACT%"=="U" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-BSIQuest.ps1" -SettingsOnly
+  goto done
+)
+
 choice /c VF /n /m " Play mode - V = VR (stereo 3D), F = Flat (big virtual screen, faster)  [V/F]: "
 if errorlevel 2 (set "BSI_MODE=Flat") else (set "BSI_MODE=VR")
 
 choice /c YN /n /m " Copy the DLC too (Burial at Sea, Clash in the Clouds)?  [Y/N]: "
 if errorlevel 2 (set "BSI_DLC=-NoDLC") else (set "BSI_DLC=")
 
-choice /c IT /n /m " I = install now, T = test only (shows what would happen, changes nothing)  [I/T]: "
-if errorlevel 2 (set "BSI_DRY=-DryRun") else (set "BSI_DRY=")
+if "%BSI_ACT%"=="T" (set "BSI_DRY=-DryRun") else (set "BSI_DRY=")
 
 echo.
 if "%~1"=="" (
@@ -44,6 +51,7 @@ if "%~1"=="" (
 ) else (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-BSIQuest.ps1" -Game "%~1" -Mode %BSI_MODE% %BSI_DLC% %BSI_DRY%
 )
+:done
 set "BSI_RC=%ERRORLEVEL%"
 
 echo.
