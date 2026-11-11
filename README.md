@@ -80,6 +80,14 @@ current installer again (it grants it and skips everything already copied), or g
 adb shell appops set com.bsiquest.game MANAGE_EXTERNAL_STORAGE allow
 ```
 
+**The copy seems stuck at `-> DLC`**, or **black screen after stopping the installer halfway**
+
+*Why:* the DLC is about 24 GB in about 7,000 files, so its percentage can sit still for minutes. If the installer is
+closed before it says `Done`, installers downloaded before 12 Nov 2026 had not yet copied the driver and settings (they
+came last), and the app shows a black screen. (A negative MB/s or time in adb's summary line is a display bug in adb;
+the copy is fine.) *Fix:* run the installer again and leave it running until it says `Done`; keep the headset awake
+(wear it, or keep the sensor between the lenses covered). Current installers copy the driver and settings first.
+
 **`adb not found`**
 
 *Why:* newer versions of SideQuest keep adb in `%APPDATA%\SideQuest\platform-tools`, where installers from before

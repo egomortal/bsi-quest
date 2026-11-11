@@ -5,9 +5,9 @@
     1. checks your game folder and that BioShockInfinite.exe is the build this app was made from
     2. finds adb and exactly one connected headset
     3. installs the APK from the release (bsi-quest.apk, next to this script)
-    4. copies your game data to the headset (about 42 GB with DLC; re-running only copies what is missing or changed)
+    4. copies the Vulkan driver and the settings files to /sdcard/BSI and sets VR or Flat
+    5. copies your game data to the headset (about 42 GB with DLC; re-running only copies what is missing or changed)
        into the app's own folder, or into /sdcard/BSI/BioShock Infinite if the headset does not let adb write there
-    5. copies the Vulkan driver and the settings files to /sdcard/BSI
 
   It never changes your Steam folder, never deletes anything on the headset, and keeps settings files that are already there
   (use -ResetSettings to replace them with the defaults).
@@ -154,9 +154,9 @@ if (-not $SkipGameData) {
 if ($DryRun) {
   Step "Dry run: nothing was changed. A real run would"
   Say "  install $Apk"
-  if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst (or to $GameAlt if the headset does not let adb write there)") }
   Say "  copy the driver to $CfgDst/turnip/ and the settings in $CfgSrc to $CfgDst"
   Say "  set the display mode to $Mode (VR = stereo 3D, Flat = big virtual screen)"
+  if (-not $SkipGameData) { Say ("  copy " + ($folders -join ", ") + " to $GameDst (or to $GameAlt if the headset does not let adb write there)") }
   exit 0
 }
 
@@ -174,7 +174,32 @@ $perm = "$(& $script:Adb shell appops get $Package MANAGE_EXTERNAL_STORAGE 2>&1)
 if ($perm -match "allow") { Say "storage access: granted" }
 else { Say "WARNING: could not grant storage access ($perm). If the game stops at start: Settings > Apps > BSI Quest > Permissions > allow file access." }
 
-# ---------------------------------------------------------------- 5. game data
+# ---------------------------------------------------------------- 5. driver + settings (before the long copy, so a copy stopped halfway still leaves a working setup)
+Step "Driver and settings"
+Run-Adb shell mkdir -p "$CfgDst/turnip" | Out-Null
+Run-Adb push $Driver "$CfgDst/turnip/vulkan.ad07xx.so" | Out-Null
+Say "driver copied"
+$existing = @(Run-Adb shell ls $CfgDst)
+foreach ($file in Get-ChildItem -Path $CfgSrc -File) {
+  if (($existing -contains $file.Name) -and -not $ResetSettings) { Say "kept     $($file.Name) (already on the headset)"; continue }
+  Run-Adb push $file.FullName "$CfgDst/$($file.Name)" | Out-Null
+  Say "copied   $($file.Name)"
+}
+# The app uses /sdcard/BSI as its settings folder only when bsi.log exists there. Never delete that file.
+if (-not ($existing -contains "bsi.log")) {
+  $tmp = Join-Path $env:TEMP "bsi_placeholder.log"
+  Set-Content -Path $tmp -Value "placeholder written by Install-BSIQuest.ps1" -Encoding ascii
+  Run-Adb push $tmp "$CfgDst/bsi.log" | Out-Null
+  Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
+  Say "created  bsi.log"
+}
+
+# ---------------------------------------------------------------- 6. display mode
+Step "Display mode: $Mode"
+& (Join-Path $PSScriptRoot "Set-Mode.ps1") -Mode $Mode -Adb $script:Adb
+if ($LASTEXITCODE -ne 0) { Fail "Could not set the display mode. Run install\Set-Mode.ps1 -Mode $Mode yourself." }
+
+# ---------------------------------------------------------------- 7. game data
 function Test-AppDir {
   $ErrorActionPreference = "Continue"
   $o = & $script:Adb shell "ls -d /sdcard/Android/data/$Package/files 2>/dev/null" 2>&1 | ForEach-Object { "$_" }
@@ -236,36 +261,12 @@ if (-not $SkipGameData) {
   Run-Adb shell "mkdir -p '$target'" | Out-Null
   foreach ($f in $folders) {
     Say "-> $f"
+    if ($f -eq "DLC") { Say "   (the DLC is about 24 GB in about 7,000 files: the percentage can sit still for several minutes. Keep the headset awake and let it run until it says Done.)" }
     New-RemoteDirs (Join-Path $Game $f) $target
     $ErrorActionPreference = "Continue"; & $script:Adb push --sync (Join-Path $Game $f) "$target/"; $ErrorActionPreference = "Stop"
     if ($LASTEXITCODE -ne 0) { Fail "Copying '$f' failed. Check the cable and run the script again; it continues where it stopped." }
   }
 }
-
-# ---------------------------------------------------------------- 6. driver + settings
-Step "Driver and settings"
-Run-Adb shell mkdir -p "$CfgDst/turnip" | Out-Null
-Run-Adb push $Driver "$CfgDst/turnip/vulkan.ad07xx.so" | Out-Null
-Say "driver copied"
-$existing = @(Run-Adb shell ls $CfgDst)
-foreach ($file in Get-ChildItem -Path $CfgSrc -File) {
-  if (($existing -contains $file.Name) -and -not $ResetSettings) { Say "kept     $($file.Name) (already on the headset)"; continue }
-  Run-Adb push $file.FullName "$CfgDst/$($file.Name)" | Out-Null
-  Say "copied   $($file.Name)"
-}
-# The app uses /sdcard/BSI as its settings folder only when bsi.log exists there. Never delete that file.
-if (-not ($existing -contains "bsi.log")) {
-  $tmp = Join-Path $env:TEMP "bsi_placeholder.log"
-  Set-Content -Path $tmp -Value "placeholder written by Install-BSIQuest.ps1" -Encoding ascii
-  Run-Adb push $tmp "$CfgDst/bsi.log" | Out-Null
-  Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
-  Say "created  bsi.log"
-}
-
-# ---------------------------------------------------------------- 7. display mode
-Step "Display mode: $Mode"
-& (Join-Path $PSScriptRoot "Set-Mode.ps1") -Mode $Mode -Adb $script:Adb
-if ($LASTEXITCODE -ne 0) { Fail "Could not set the display mode. Run install\Set-Mode.ps1 -Mode $Mode yourself." }
 
 Step "Done"
 Say "Put the headset on and start 'BSI Quest' from Unknown Sources in your app library."
