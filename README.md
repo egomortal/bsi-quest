@@ -155,8 +155,9 @@ the same picture as before, proven by a bit-for-bit comparison, and that is the 
   Five of the ten spots meet the target. The heaviest need about a third less GPU time.
 - Two release channels on the Releases page:
   - **Stable** (marked "Latest"): build 142, the build that has been played on a headset. Use this one.
-  - **Experimental** (marked "Pre-release"): build 143 and later. Newer optimisations and fixes, less tested, may be
-    broken. Build 143 fixes an occasional slow state at the Fair (about 12 fps until the checkpoint is reloaded).
+  - **Experimental** (marked "Pre-release"): newer builds with the latest optimisations and fixes, less tested, may be
+    broken. None is published yet. The first will be build 143, which fixes an occasional slow state at the Fair (about
+    12 fps until the checkpoint is reloaded); it is waiting for its headset test.
   A build moves to stable after it has been played without problems. Both use the same installer. Android does not
   install an older build over a newer one: going back from experimental to stable means uninstalling the app first,
   which also removes the game data copied to the headset, so the installer has to copy it again. Saves and settings
