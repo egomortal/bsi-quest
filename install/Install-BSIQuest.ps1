@@ -285,6 +285,15 @@ if (-not $SkipGameData) {
       elseif ($read -eq "unknown") { Say "WARNING: could not check (the app did not write its log in time). Copying to $GameDst anyway." }
       else {
         Say "This headset does not let the app read files copied into its own folder. Using $GameAlt instead (the app finds it there)."
+        # Most likely cause: the folder was left behind by an earlier install and belongs to the old app's user ID.
+        $ErrorActionPreference = "Continue"
+        $owner = "$(& $script:Adb shell "ls -lnd /sdcard/Android/data/$Package" 2>&1)"
+        $appId = "$(& $script:Adb shell "dumpsys package $Package | grep -m1 appId=" 2>&1)"
+        $ErrorActionPreference = "Stop"
+        if ($owner -match "^\S+\s+\d+\s+(\d+)" -and ($o = $Matches[1]) -and $appId -match "appId=(\d+)" -and $o -ne $Matches[1]) {
+          Say ("NOTE: the app's folder belongs to an earlier install (owner $o, app $($Matches[1])). For a clean setup like the`n" +
+               "      tested one, run Uninstall.bat and then Install.bat again. This install still works without that.")
+        }
         $target = $GameAlt
         # Game data already copied there by an earlier run: move it on the headset instead of copying 42 GB again.
         Run-Adb shell "mkdir -p '$GameAlt'" | Out-Null

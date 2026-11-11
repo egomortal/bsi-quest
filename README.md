@@ -36,6 +36,9 @@ and the store you bought it from. Please send only the fingerprint, never the fi
 4. Double-click `Install.bat` in the unzipped folder. It asks three things (VR or Flat, DLC or not, install or test
    only) and then does the rest. If it cannot find your game, drag your `BioShock Infinite` folder onto `Install.bat`.
 
+To remove it again, double-click `Uninstall.bat`: it removes the app and the game data in its folder and keeps your
+saves and settings in `/sdcard/BSI`.
+
 Windows may show a "Windows protected your PC" or security prompt for a downloaded `.bat` file: that is normal for any
 unsigned script. Every file in the zip is a plain text script you can open and read first.
 
@@ -74,9 +77,11 @@ also finds by itself (that folder stays when the app is uninstalled; delete it w
 `app-folder read test ... FAILED Permission denied` and `game folder missing`
 
 *Why:* on some headsets the app is not allowed to read the game files the installer copied into its own folder, so it
-finds no game. Installers downloaded before 12 Nov 2026 did not check this. *Fix:* run the current installer again. It
-now starts the app for a few seconds to ask whether it can read its folder; if not, it moves the game on the headset to
-`/sdcard/BSI/BioShock Infinite` (no new copy from the PC), where the app can read it.
+finds no game. The usual cause is an app folder left behind by an earlier install, which still belongs to the old copy
+of the app. Installers downloaded before 12 Nov 2026 did not check this. *Fix:* for a clean setup, double-click
+`Uninstall.bat` (removes the app and its folder, keeps your saves and settings in `/sdcard/BSI`), then `Install.bat`.
+Or just run the current installer again: it starts the app for a few seconds to ask whether it can read its folder,
+and if not, moves the game on the headset to `/sdcard/BSI/BioShock Infinite` (no new copy from the PC).
 
 **The game closes right after starting, or shows nothing** (after an install that finished)
 
