@@ -61,14 +61,14 @@ Every fix below is safe to try: re-running the installer skips what is already d
 **`remote secure_mkdirs failed: Operation not permitted`** while copying game data (at any file, for example
 `ApexFrameworkSHIPPING_x86.dll` or `vcredist_x86_vs2008sp1.exe`)
 
-*Why:* the installer first tries the app's own folder on the headset, `/sdcard/Android/data/com.bsiquest.game`. Current
-Quest system software does not let adb create folders there at all, even after the app has been opened once. Installers
-downloaded before 12 Nov 2026 had no way around this. Found by the first players to install: thank you.
+*Why:* the game data goes into the app's own folder on the headset, `/sdcard/Android/data/com.bsiquest.game`. Current
+Quest system software does not let adb create folders there while copying, even after the app has been opened once.
+Installers downloaded before 12 Nov 2026 relied on that. Found by the first players to install: thank you.
 
-*Fix:* download the current `BSI-Quest-Installer.zip` from the release and run it again. When the headset refuses the
-app's folder, it now copies the game to `/sdcard/BSI/BioShock Infinite` instead, which the app finds by itself. Nothing
-else to do: no need to open the app first or to uninstall. Game data in that folder stays when the app is uninstalled
-(delete the folder yourself with a file manager if you want the space back).
+*Fix:* download the current `BSI-Quest-Installer.zip` from the release and run it again. It now creates the folders
+first and then copies into them, which the headset allows. No need to open the app first or to uninstall. If a headset
+refuses even that, the installer says so and copies the game to `/sdcard/BSI/BioShock Infinite` instead, which the app
+also finds by itself (that folder stays when the app is uninstalled; delete it with a file manager to get the space back).
 
 **The game closes right after starting, or shows nothing** (after an install that finished)
 

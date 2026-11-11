@@ -181,18 +181,30 @@ function Test-AppDir {
   return ("$o" -match "/files")
 }
 function Test-AdbCanWrite([string]$dir) {
-  # adb push creates folders itself (adbd "secure_mkdirs"); some headsets refuse that inside Android/data even when
-  # "adb shell mkdir" works. Push a tiny file into a new subfolder to find out, then remove only that probe.
+  # Current Quest software refuses folders made by adb push itself (adbd "secure_mkdirs") inside Android/data, but
+  # allows "adb shell mkdir" and pushes into folders that already exist. So the copy makes every folder with the shell
+  # first (New-RemoteDirs). Probe the same way: shell mkdir, push a tiny file, then remove only that probe.
   $ErrorActionPreference = "Continue"
   $tmp = Join-Path $env:TEMP "bsi_probe.txt"
   Set-Content -Path $tmp -Value "probe written by Install-BSIQuest.ps1" -Encoding ascii
-  & $script:Adb shell "mkdir -p '$dir'" 2>&1 | Out-Null
+  & $script:Adb shell "mkdir -p '$dir/.bsi_probe'" 2>&1 | Out-Null
   $o = & $script:Adb push $tmp "$dir/.bsi_probe/probe.txt" 2>&1 | ForEach-Object { "$_" }
   $ok = ($LASTEXITCODE -eq 0)
   & $script:Adb shell "rm -f '$dir/.bsi_probe/probe.txt'; rmdir '$dir/.bsi_probe'" 2>&1 | Out-Null
   Remove-Item -LiteralPath (Get-Item -LiteralPath $tmp).FullName
   if (-not $ok) { Say ("  adb cannot write to $dir`n  " + ($o -join "`n  ")) }
   return $ok
+}
+function New-RemoteDirs([string]$local, [string]$remote) {
+  # Make $remote/<name of $local> and every folder below it with "adb shell mkdir -p", a few dozen per call.
+  $base = (Get-Item -LiteralPath $local).FullName
+  $leaf = Split-Path $base -Leaf
+  $rel = @($leaf) + @(Get-ChildItem -LiteralPath $base -Directory -Recurse | ForEach-Object {
+    $leaf + "/" + ($_.FullName.Substring($base.Length + 1) -replace '\\', '/') })
+  for ($i = 0; $i -lt $rel.Count; $i += 40) {
+    $batch = $rel[$i..([Math]::Min($i + 39, $rel.Count - 1))] | ForEach-Object { "'" + ("$remote/$_" -replace "'", "'\''") + "'" }
+    Run-Adb shell ("mkdir -p " + ($batch -join " ")) | Out-Null
+  }
 }
 if (-not $SkipGameData) {
   $target = $GameDst
@@ -224,6 +236,7 @@ if (-not $SkipGameData) {
   Run-Adb shell "mkdir -p '$target'" | Out-Null
   foreach ($f in $folders) {
     Say "-> $f"
+    New-RemoteDirs (Join-Path $Game $f) $target
     $ErrorActionPreference = "Continue"; & $script:Adb push --sync (Join-Path $Game $f) "$target/"; $ErrorActionPreference = "Stop"
     if ($LASTEXITCODE -ne 0) { Fail "Copying '$f' failed. Check the cable and run the script again; it continues where it stopped." }
   }
