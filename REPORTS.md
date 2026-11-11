@@ -47,7 +47,8 @@ install folder) is replaced by the script. You can open the zip and read every f
 
 ## How to make one
 
-Connect the headset by USB after a session and run:
+Connect the headset by USB after a session and double-click `Send-Report.bat` (next to `Install.bat`), or run it
+with a note:
 
 ```
 powershell -ExecutionPolicy Bypass -File install\Send-Report.ps1 -Note "what happened, where"

@@ -2,3 +2,4 @@ install/config/* -text
 *.patch -text
 *.diff -text
 *.sh text eol=lf
+*.bat text eol=crlf

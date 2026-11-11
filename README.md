@@ -31,15 +31,23 @@ and the store you bought it from. Please send only the fingerprint, never the fi
 
 1. Install BioShock Infinite from Steam on your PC (DLC optional).
 2. Turn on developer mode on the Quest, connect it by USB and accept the debugging prompt. Install SideQuest if you have no adb.
-3. Download `bsi-quest.apk` and `vulkan.ad07xx.so` from the stable release ("Latest") on the Releases page into the `install` folder of this repository.
-4. Run:
+3. Download `BSI-Quest-Installer.zip` from the stable release ("Latest") on the Releases page and unzip it. It holds the
+   app, the driver, the settings and the installer in one folder.
+4. Double-click `Install.bat` in the unzipped folder. It asks three things (VR or Flat, DLC or not, install or test
+   only) and then does the rest. If it cannot find your game, drag your `BioShock Infinite` folder onto `Install.bat`.
 
-   ```
-   powershell -ExecutionPolicy Bypass -File install\Install-BSIQuest.ps1
-   ```
+Windows may show a "Windows protected your PC" or security prompt for a downloaded `.bat` file: that is normal for any
+unsigned script. Every file in the zip is a plain text script you can open and read first.
 
-   Add `-DryRun` to see what it would do, `-NoDLC` to skip the DLC, `-Mode Flat` for the big-screen mode,
-   `-Game <folder>` if Steam is not found.
+**From a clone of this repository instead:** put `bsi-quest.apk` and `vulkan.ad07xx.so` from the release into the
+`install` folder and double-click `install\Install.bat`, or run the script directly:
+
+```
+powershell -ExecutionPolicy Bypass -File install\Install-BSIQuest.ps1
+```
+
+Options for the script: `-DryRun` to see what it would do, `-NoDLC` to skip the DLC, `-Mode Flat` for the big-screen
+mode, `-Game <folder>` if Steam is not found.
 
 The script checks that your `BioShockInfinite.exe` is the build the app was made from, installs the app, copies the game data
 (re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
@@ -52,7 +60,7 @@ Steam folder and does not delete or overwrite anything already on the headset.
 | **VR** (default) | Stereo 3D: you stand inside Columbia, your head moves the view, the HUD floats in front of you | Two views are drawn, so this is the heavy mode: 24-49 fps depending on the area |
 | **Flat** | The game on a big virtual screen in front of you, like a private cinema | One view is drawn, so it runs roughly twice as fast |
 
-Pick one when you install (`-Mode VR` or `-Mode Flat`), and switch whenever you like:
+Pick one when you install, and switch whenever you like: double-click `Switch-Mode.bat` (next to `Install.bat`), or run:
 
 ```
 powershell -ExecutionPolicy Bypass -File install\Set-Mode.ps1 -Mode Flat
