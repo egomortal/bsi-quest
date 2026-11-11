@@ -54,6 +54,7 @@ function Find-Adb {
   $c = Get-Command adb -ErrorAction SilentlyContinue
   if ($c) { return $c.Source }
   $candidates = @(
+    "$env:APPDATA\SideQuest\platform-tools\adb.exe",
     "$env:ProgramFiles\SideQuest\resources\platform-tools\adb.exe",
     "$env:LOCALAPPDATA\Programs\SideQuest\resources\platform-tools\adb.exe",
     "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
@@ -159,7 +160,29 @@ Run-Adb shell am force-stop $Package | Out-Null
 Run-Adb install -r $Apk | ForEach-Object { Say $_ }
 
 # ---------------------------------------------------------------- 5. game data
+function Test-AppDir {
+  $ErrorActionPreference = "Continue"
+  $o = & $script:Adb shell "ls -d /sdcard/Android/data/$Package/files 2>/dev/null" 2>&1 | ForEach-Object { "$_" }
+  return ("$o" -match "/files")
+}
 if (-not $SkipGameData) {
+  # Android 11+ lets only the system create /sdcard/Android/data/<app>; it does so the first time the app starts.
+  # adb cannot create it ("secure_mkdirs failed: Operation not permitted"), so start the app once and wait for it.
+  if (-not (Test-AppDir)) {
+    Step "Starting the app once so the headset creates its data folder"
+    $ErrorActionPreference = "Continue"
+    & $script:Adb shell am start -W -n "$Package/android.app.NativeActivity" 2>&1 | Out-Null
+    $ErrorActionPreference = "Stop"
+    $ok = $false
+    for ($i = 0; $i -lt 30 -and -not $ok; $i++) { Start-Sleep -Seconds 1; $ok = Test-AppDir }
+    Run-Adb shell am force-stop $Package | Out-Null
+    if (-not $ok) {
+      Fail ("The headset did not create the app's data folder.`n" +
+            "Put the headset on, open 'BSI Quest' once from Unknown Sources in your app library, close it,`n" +
+            "then run this installer again (it skips what is already done).")
+    }
+    Say "data folder created"
+  }
   Step "Copying game data (this takes a long time the first time; safe to re-run if it is interrupted)"
   Run-Adb shell mkdir -p $GameDst | Out-Null
   foreach ($f in $folders) {

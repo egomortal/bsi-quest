@@ -29,7 +29,8 @@ function Find-Adb {
   if ($Adb) { if (Test-Path $Adb) { return $Adb } else { Fail "adb not found at $Adb" } }
   $c = Get-Command adb -ErrorAction SilentlyContinue
   if ($c) { return $c.Source }
-  foreach ($p in "$env:ProgramFiles\SideQuest\resources\platform-tools\adb.exe",
+  foreach ($p in "$env:APPDATA\SideQuest\platform-tools\adb.exe",
+                 "$env:ProgramFiles\SideQuest\resources\platform-tools\adb.exe",
                  "$env:LOCALAPPDATA\Programs\SideQuest\resources\platform-tools\adb.exe",
                  "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe") { if (Test-Path $p) { return $p } }
   Fail "adb not found. Install SideQuest, or pass -Adb <path to adb.exe>."
