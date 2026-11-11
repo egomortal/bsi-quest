@@ -54,7 +54,8 @@ mode, `-Game <folder>` if Steam is not found.
 
 The script checks that your `BioShockInfinite.exe` is the build the app was made from, installs the app, copies the game data
 (re-running continues where it stopped), and puts the driver and the Ultra settings in `/sdcard/BSI`. It does not change your
-Steam folder and does not delete or overwrite anything already on the headset.
+Steam folder and does not delete or overwrite anything already on the headset (if the app cannot read its own folder, it
+moves its own game copy to `/sdcard/BSI/BioShock Infinite`; see "If the install stops").
 
 ### If the install stops
 
@@ -288,7 +289,7 @@ The rules (same picture, a switch for every change, measured before and after) a
 
 | Folder | What it is |
 |---|---|
-| `install/` | Installer, VR/Flat mode switch, play-report script, and the default settings files for the headset |
+| `install/` | Installer, clean uninstaller, VR/Flat mode switch, play-report script, and the default settings files for the headset |
 | `setup.py` | For building from source: checks the game folder and the tools, reports the state of each pipeline stage |
 | `ghidra/` | Ghidra scripts that export function bodies, the call graph and imports from your exe |
 | `translator/` | x86 -> C translator (`x86c.py`, `vec_ops.py`, `genall.py`), exception-handling scan (`eh/`), build and link scripts |

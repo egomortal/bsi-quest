@@ -50,6 +50,12 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
   first and then copies into them; if a headset refuses even that, it copies to `/sdcard/BSI/BioShock Infinite`, which
   the app also reads. It now also grants the app's storage access (a fresh install had none, so the app could not read
   `/sdcard/BSI`), and finds adb where newer SideQuest keeps it (`%APPDATA%\SideQuest\platform-tools`).
+- More install fixes from the first player (11-12 Nov 2026): the driver, settings and VR/Flat mode are now copied before
+  the long game copy, so stopping during the slow DLC copy no longer leaves a black screen. New installs skip the
+  startup movies (`skip_intro.txt`), like the tested headset. The installer starts the app for a few seconds to ask
+  whether it can read its own folder (one player's could not: "app-folder read test ... FAILED Permission denied"); if
+  not, it moves the game on the headset to `/sdcard/BSI/BioShock Infinite` and says when the folder is left over from
+  an earlier install. New `Uninstall.bat` removes the app and its folder cleanly and keeps saves and settings.
 
 ## Tooling
 

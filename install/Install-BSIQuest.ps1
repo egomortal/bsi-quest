@@ -9,7 +9,8 @@
     5. copies your game data to the headset (about 42 GB with DLC; re-running only copies what is missing or changed)
        into the app's own folder, or into /sdcard/BSI/BioShock Infinite if the headset does not let adb write there
 
-  It never changes your Steam folder, never deletes anything on the headset, and keeps settings files that are already there
+  It never changes your Steam folder, never deletes anything on the headset (it may move its own game copy from the app's
+  folder to /sdcard/BSI/BioShock Infinite when the app cannot read it), and keeps settings files that are already there
   (use -ResetSettings to replace them with the defaults).
 
   Usage (PowerShell, headset connected by USB with developer mode on):
