@@ -56,6 +56,9 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
   whether it can read its own folder (one player's could not: "app-folder read test ... FAILED Permission denied"); if
   not, it moves the game on the headset to `/sdcard/BSI/BioShock Infinite` and says when the folder is left over from
   an earlier install. New `Uninstall.bat` removes the app and its folder cleanly and keeps saves and settings.
+- Players now get GTAO ambient occlusion like the test headset (the `match` preset, approved as the reference picture
+  on 2 Nov): the installer copies `config/ao/gtao_match` to `/sdcard/BSI/ao/`. Before, only `ao_sel.txt` shipped and the
+  game's own HDAO ran. Source in `tools/gtao/` (our own shader, based on Intel XeGTAO, MIT).
 
 ## Tooling
 

@@ -186,6 +186,19 @@ foreach ($file in Get-ChildItem -Path $CfgSrc -File) {
   Run-Adb push $file.FullName "$CfgDst/$($file.Name)" | Out-Null
   Say "copied   $($file.Name)"
 }
+# Settings folders (config\ao\gtao_match = GTAO ambient occlusion, selected by ao_sel.txt = 3): same rule, file by file.
+$cfgRoot = (Get-Item -LiteralPath $CfgSrc).FullName
+foreach ($file in Get-ChildItem -Path $cfgRoot -File -Recurse | Where-Object { $_.DirectoryName -ne $cfgRoot }) {
+  $rel = $file.FullName.Substring($cfgRoot.Length + 1) -replace '\\', '/'
+  $remote = "$CfgDst/$rel"
+  $ErrorActionPreference = "Continue"
+  $there = "$(& $script:Adb shell "ls '$remote' 2>/dev/null" 2>&1)"
+  $ErrorActionPreference = "Stop"
+  if (($there -match [regex]::Escape($file.Name)) -and -not $ResetSettings) { Say "kept     $rel (already on the headset)"; continue }
+  Run-Adb shell "mkdir -p '$($remote.Substring(0, $remote.LastIndexOf('/')))'" | Out-Null
+  Run-Adb push $file.FullName $remote | Out-Null
+  Say "copied   $rel"
+}
 # The app uses /sdcard/BSI as its settings folder only when bsi.log exists there. Never delete that file.
 if (-not ($existing -contains "bsi.log")) {
   $tmp = Join-Path $env:TEMP "bsi_placeholder.log"

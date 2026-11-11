@@ -1,0 +1,413 @@
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+// GTAO replacement for the game's HDAO main pass (BioShock Infinite recomp, Quest 3).
+//
+// Ground-truth ambient occlusion after Jimenez et al. 2016 ("Practical Real-Time Strategies for Accurate Indirect
+// Occlusion") as implemented in Intel XeGTAO (https://github.com/GameTechDev/XeGTAO), adapted to a single compute pass
+// that reads the game's own inputs. The slice setup, horizon search, falloff, inner integral, FastACos structure and
+// the depth-normal reconstruction follow XeGTAO's XeGTAO_MainPass / XeGTAO_CalculateNormal, which carry this license:
+//
+// ---------------------------------------------------------------------------------------------------------------------
+// Copyright (C) 2016-2021, Intel Corporation
+//
+// SPDX-License-Identifier: MIT
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+// documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+// Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+// WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// ---------------------------------------------------------------------------------------------------------------------
+//
+// Interface = the game's HDAO main pass (names matter: DXVK's BSI_SHADER_REPLACE hook maps descriptors by OpName):
+//   cb0 (6 x vec4): [0] fade start, fade scale, depth linearisation z = 1/(min(d,0.999)*c0.z - c0.w)
+//                   [1..3] world->view rotation rows for the normals, [4] RT size + 1/size, [5].xy tan(half FOV) x/y
+//   t0 = device depth (R32F), t1 = world normals (RGBA8, n*0.5+0.5), u0 = RGBA8 output:
+//   .x = AO^2 exactly as the game stores it (the two blur passes and the composite read .x), .yzw = 8-bit split of
+//   saturate(linear depth) (the game's .yzw is never read downstream, notes/HDAO_MOBILE.md section 1).
+// No sampler is used (texelFetch), so the shader works with both of DXVK's sampler binding models.
+//
+// Differences to XeGTAO (all because this runs as one pass in front of the game's own blur, with no denoiser,
+// no depth MIP chain and an 8-bit intermediate):
+//   * Slice directions are 8 screen directions whose multiples are whole pixels (D[] below), so every sample lies
+//     exactly on its slice line. XeGTAO rounds arbitrary directions to the nearest pixel; on surfaces seen at grazing
+//     angles that half-pixel error moves samples up/down the surface and the horizon max() turns it into false
+//     occlusion (flat floors went 2-5 % dark).
+//   * Self-normalised estimator: visibility = sum(w*projNLen*(iarc0+iarc1)) / sum(w*projNLen*(cos n + n sin n)).
+//     Same expected value as XeGTAO's average (the denominator averages to 1 over all slice angles), but exactly 1
+//     on unoccluded surfaces; XeGTAO's plain average with few slices exceeds 1 on some pixels and below 1 on others,
+//     which only averages out if values > 1 survive until a denoiser (XeGTAO stores vis/1.5 for that).
+//   * QUAD: the 4 pixels of each 2x2 quad use the 4 perpendicular direction pairs and pool their sums (depth-aware),
+//     so each pixel gets 8 directions for the price of 2. No other denoise: the game's two blurs follow.
+//   * FastACos uses the 3rd-order polynomial (max error 7e-5 rad instead of 9e-3).
+//   * Normals: by default reconstructed from depth (XeGTAO_CalculateNormal-style); the game's normal buffer carries
+//     normal-map detail and differs from the depth geometry by 1-2 degrees, which reads as false occlusion.
+//   * Output is mapped to the game's convention: v = 1 - INTENSITY*(1 - vis^FINALPOW), faded out exactly like HDAO
+//     (saturate((z - fadeStart) * fadeScale), pixels at fade 1 skipped), then raised to OUTPOW (HDAO stores AO^2).
+//
+// Compile-time parameters (regress/gtao/mk_gtao.py sets them per preset):
+//   SLICES            directions per evaluation: 2 (one perpendicular pair), 4 or 8
+//   STEPS             samples per direction side
+//   SCREENRAD=1       fixed screen-space radius RADIUS_PX (HDAO-like: HDAO's ring is ~10 px at every distance)
+//   SCREENRAD=0       world-space radius RADIUS_W (game units) clamped to [RMIN_PX, RMAX_PX] pixels
+//   FALLOFF           XeGTAO FalloffRange: fraction of the radius over which a sample's weight fades to 0
+//   DISTPOW           XeGTAO SampleDistributionPower (sample spacing grows towards the radius)
+//   USE_THIN, THIN    thin-occluder compensation: the falloff distance counts z differences (1+THIN) times
+//   FINALPOW          XeGTAO FinalValuePower
+//   INTENSITY, OUTPOW tone mapping to the game's .x (fitted to HDAO)
+//   DNRM              1: normals from depth, 0: the game's normal buffer
+//   JITTER            1: step positions jittered over the quad and a 4x4 pattern of quads; 0: fixed positions;
+//                     2: each direction pair of a quad gets its own fixed step phase (identical in every quad: the
+//                     pooled quad covers 4 phases, so bands are 4x finer than with 0, and no quad differs from another)
+//   CLAMP             1: clamp sample coordinates to the screen; 0: rely on D3D11's zero for off-screen texel
+//                     fetches (DXVK robust image access) and treat those samples as far away (cheaper)
+//   QUAD              1: 2x2 quad pooling (8x8 pixels per group of 64 threads), 0: every pixel on its own (GX x GY)
+//   CONST_AO          calibration only: write this constant .x everywhere (side-by-side tooling, never shipped)
+//   HALF              1: one evaluation per 2x2 quad (half resolution, SLICES directions), shared by the quad's
+//                     pixels whose depth is within 2 % of it; the others are evaluated on their own
+#ifndef SLICES
+#define SLICES 2
+#endif
+#ifndef STEPS
+#define STEPS 3
+#endif
+#ifndef SCREENRAD
+#define SCREENRAD 0
+#endif
+#ifndef RADIUS_PX
+#define RADIUS_PX 12.0
+#endif
+#ifndef RADIUS_W
+#define RADIUS_W 40.0
+#endif
+#ifndef RMIN_PX
+#define RMIN_PX 4.0
+#endif
+#ifndef RMAX_PX
+#define RMAX_PX 32.0
+#endif
+#ifndef FALLOFF
+#define FALLOFF 0.615
+#endif
+#ifndef DISTPOW
+#define DISTPOW 2.0
+#endif
+#ifndef THIN
+#define THIN 0.0
+#endif
+#ifndef USE_THIN
+#define USE_THIN 0
+#endif
+#ifndef FINALPOW
+#define FINALPOW 2.2
+#endif
+#ifndef INTENSITY
+#define INTENSITY 1.0
+#endif
+#ifndef OUTPOW
+#define OUTPOW 2.0
+#endif
+#ifndef DNRM
+#define DNRM 1
+#endif
+#ifndef CLAMP
+#define CLAMP 1
+#endif
+#ifndef JITTER
+#define JITTER 1
+#endif
+#ifndef HALF
+#define HALF 0
+#endif
+#ifndef QUAD
+#define QUAD 1
+#endif
+#if HALF
+#undef QUAD
+#define QUAD 0
+#endif
+#ifndef GX
+#define GX 8
+#endif
+#ifndef GY
+#define GY 8
+#endif
+
+#if QUAD
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;   // 8x8 pixels, thread order = 2x2 quads
+#else
+layout(local_size_x = GX, local_size_y = GY, local_size_z = 1) in;
+#endif
+
+layout(set = 1, binding = 0, std140) uniform cb0_buf { vec4 c[6]; } cb0;
+layout(set = 2, binding = 0) uniform texture2D t0;
+layout(set = 2, binding = 1) uniform texture2D t1;
+layout(set = 3, binding = 0) writeonly uniform image2D u0;
+
+const float PI = 3.1415926535897932384626433832795;
+const float PI_HALF = 1.5707963267948966192313216916398;
+
+float fastAcos(float inX) {
+  float x = abs(inX);
+  float res = ((-0.0187293 * x + 0.0742610) * x - 0.2121144) * x + 1.5707288;
+  res *= sqrt(max(1.0 - x, 0.0));
+  return (inX >= 0.0) ? res : PI - res;
+}
+
+float linz(float d) {
+  // the game's linearisation; sky (d = 1) gives inf there, kept finite here so neighbours of sky pixels stay finite
+  return min(1.0 / (min(d, 0.999) * cb0.c[0].z - cb0.c[0].w), 1.0e6);
+}
+
+// view space like the game (x right, y up, z forward), at the pixel centre
+vec3 vpos(vec2 pixc, float z) {
+  vec2 ndc = pixc * cb0.c[4].zw * 2.0 - 1.0;
+  return vec3(z * ndc.x * cb0.c[5].x, -(z * ndc.y) * cb0.c[5].y, z);
+}
+
+float depthAt(ivec2 p, ivec2 lim) {
+  return linz(texelFetch(t0, clamp(p, ivec2(0), lim), 0).x);
+}
+
+float fadeOf(float z) {
+  return clamp((z - cb0.c[0].x) * cb0.c[0].y, 0.0, 1.0);
+}
+
+// view-space normal from the depth buffer: for each axis the neighbour with the smaller depth step, towards the camera
+vec3 depthNormal(ivec2 p, float z, ivec2 lim) {
+  vec2 pixc = vec2(p) + 0.5;
+  vec3 P = vpos(pixc, z);
+  vec3 PL = vpos(pixc + vec2(-1.0, 0.0), depthAt(p + ivec2(-1, 0), lim));
+  vec3 PR = vpos(pixc + vec2(1.0, 0.0), depthAt(p + ivec2(1, 0), lim));
+  vec3 PT = vpos(pixc + vec2(0.0, -1.0), depthAt(p + ivec2(0, -1), lim));
+  vec3 PB = vpos(pixc + vec2(0.0, 1.0), depthAt(p + ivec2(0, 1), lim));
+  vec3 dx = abs(PR.z - z) < abs(z - PL.z) ? PR - P : P - PL;
+  vec3 dy = abs(PB.z - z) < abs(z - PT.z) ? PB - P : P - PT;
+  vec3 n = normalize(cross(dx, dy));
+  return dot(n, P) > 0.0 ? -n : n;
+}
+
+vec3 bufferNormal(ivec2 p, ivec2 lim) {
+  vec3 n = normalize(texelFetch(t1, clamp(p, ivec2(0), lim), 0).xyz * 2.0 - 1.0);
+  return normalize(n.x * cb0.c[1].xyz + n.y * cb0.c[2].xyz + n.z * cb0.c[3].xyz);
+}
+
+vec3 normalAt(ivec2 p, float z, ivec2 lim) {
+#if DNRM
+  return depthNormal(p, z, lim);
+#else
+  return bufferNormal(p, lim);
+#endif
+}
+
+// 8 screen directions with whole-pixel steps; D[i] and D[i+4] are perpendicular; W = angle each one stands for (deg)
+const ivec2 D[8] = ivec2[8](ivec2(1, 0), ivec2(2, 1), ivec2(1, 1), ivec2(1, 2), ivec2(0, 1), ivec2(-1, 2), ivec2(-1, 1), ivec2(-2, 1));
+const float W[8] = float[8](26.565, 22.5, 18.435, 22.5, 26.565, 22.5, 18.435, 22.5);
+const int BAYER[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+
+// GTAO sums for pixel ip: x = sum of weighted slice visibility, y = the same slices' unoccluded value
+// pair0 = first direction pair (0..3), jitter = step jitter in [0,1)
+vec2 gtaoSums(ivec2 ip, float z, vec3 N, ivec2 lim, int pair0, float jitter) {
+  // view position = z * (A, 1) with A affine in the pixel centre: A(q) = (q + 0.5) * uvScale + uvBias, so a sample
+  // k whole steps along a direction is A(p) +- k * dA (two FMAs) instead of a full reconstruction
+  vec2 uvScale = vec2(2.0 * cb0.c[4].z * cb0.c[5].x, -2.0 * cb0.c[4].w * cb0.c[5].y);
+  vec2 uvBias = vec2(-cb0.c[5].x, cb0.c[5].y);
+  vec2 Ap = (vec2(ip) + 0.5) * uvScale + uvBias;
+  vec3 P = vec3(Ap * z, z);
+  vec3 V = normalize(-P);
+  float pixSize = 2.0 * z * cb0.c[5].y * cb0.c[4].w;          // view units per pixel at this depth
+#if SCREENRAD
+  float rpx = RADIUS_PX;
+#else
+  float rpx = clamp(RADIUS_W / pixSize, RMIN_PX, RMAX_PX);
+#endif
+  float radius = rpx * pixSize;                               // world radius actually covered
+  float falloffRange = FALLOFF * radius;
+  float falloffFrom = radius * (1.0 - FALLOFF);
+  float falloffMul = -1.0 / falloffRange;
+  float falloffAdd = falloffFrom / falloffRange + 1.0;
+
+  vec2 sums = vec2(0.0);
+  for (int slice = 0; slice < SLICES; slice++) {
+    // SLICES 1: direction pair0 (0..7); 2: pair0, pair0+4; 4: + pair0+2, pair0+6; 8: all
+    int di = SLICES == 1 ? pair0 : (pair0 + (slice & 1) * 4 + (slice >> 1) * (SLICES == 8 ? 1 : 2)) & 7;
+    ivec2 dpx = D[di];
+    float dlen = length(vec2(dpx));
+    vec3 dirVec = vec3(vec2(dpx.x, -dpx.y) / dlen, 0.0);      // view space (y up)
+    vec3 orthoDirVec = dirVec - dot(dirVec, V) * V;
+    vec3 axisVec = normalize(cross(orthoDirVec, V));
+    vec3 projN = N - axisVec * dot(N, axisVec);
+    float signNorm = sign(dot(orthoDirVec, projN));
+    float projNLen = length(projN);
+    float cosNorm = clamp(dot(projN, V) / projNLen, 0.0, 1.0);
+    float n = signNorm * fastAcos(cosNorm);
+    float sinN = signNorm * sqrt(max(1.0 - cosNorm * cosNorm, 0.0));   // = sin(n)
+    float lowH0 = -sinN;                                      // cos(n + pi/2)
+    float lowH1 = sinN;                                       // cos(n - pi/2)
+    float hc0 = lowH0, hc1 = lowH1;
+    float kmax = rpx / dlen;
+    vec2 dA = vec2(dpx) * uvScale;
+    for (int st = 0; st < STEPS; st++) {
+      float s = pow((float(st) + jitter) / float(STEPS), DISTPOW);
+      int k = max(1, int(s * kmax + 0.5));
+      ivec2 o = dpx * k;
+      vec2 A0 = Ap + float(k) * dA, A1 = Ap - float(k) * dA;
+#if CLAMP
+      float z0 = 1.0 / (min(texelFetch(t0, clamp(ip + o, ivec2(0), lim), 0).x, 0.999) * cb0.c[0].z - cb0.c[0].w);
+      float z1 = 1.0 / (min(texelFetch(t0, clamp(ip - o, ivec2(0), lim), 0).x, 0.999) * cb0.c[0].z - cb0.c[0].w);
+#else
+      // off-screen fetches return 0 (D3D11 semantics, DXVK robust image access): treat them as far away (no occluder)
+      float e0 = texelFetch(t0, ip + o, 0).x, e1 = texelFetch(t0, ip - o, 0).x;
+      float z0 = e0 > 0.0 ? 1.0 / (min(e0, 0.999) * cb0.c[0].z - cb0.c[0].w) : 1.0e6;
+      float z1 = e1 > 0.0 ? 1.0 / (min(e1, 0.999) * cb0.c[0].z - cb0.c[0].w) : 1.0e6;
+#endif
+      vec3 d0 = vec3(A0 * z0, z0) - P;
+      vec3 d1 = vec3(A1 * z1, z1) - P;
+      float r0 = inversesqrt(dot(d0, d0)), r1 = inversesqrt(dot(d1, d1));
+      float c0 = dot(d0, V) * r0, c1 = dot(d1, V) * r1;
+#if USE_THIN
+      float l0 = length(vec3(d0.xy, d0.z * (1.0 + THIN)));
+      float l1 = length(vec3(d1.xy, d1.z * (1.0 + THIN)));
+#else
+      float l0 = dot(d0, d0) * r0, l1 = dot(d1, d1) * r1;
+#endif
+      float w0 = clamp(l0 * falloffMul + falloffAdd, 0.0, 1.0);
+      float w1 = clamp(l1 * falloffMul + falloffAdd, 0.0, 1.0);
+      hc0 = max(hc0, mix(lowH0, c0, w0));
+      hc1 = max(hc1, mix(lowH1, c1, w1));
+    }
+    projNLen = mix(projNLen, 1.0, 0.05);
+    float h0 = -fastAcos(clamp(hc1, -1.0, 1.0));
+    float h1 = fastAcos(clamp(hc0, -1.0, 1.0));
+    h0 = n + clamp(h0 - n, -PI_HALF, PI_HALF);
+    h1 = n + clamp(h1 - n, -PI_HALF, PI_HALF);
+    float iarc0 = (cosNorm + 2.0 * h0 * sinN - cos(2.0 * h0 - n)) * 0.25;
+    float iarc1 = (cosNorm + 2.0 * h1 * sinN - cos(2.0 * h1 - n)) * 0.25;
+    float wsl = W[di] * projNLen;
+    sums += wsl * vec2(iarc0 + iarc1, cosNorm + n * sinN);
+  }
+  return sums;
+}
+
+float finish(vec2 sums) {
+  float vis = sums.x / sums.y;
+  vis = vis >= 0.0 ? vis : 1.0;                               // NaN guard (degenerate normal next to the sky)
+  return max(0.03, pow(clamp(vis, 0.0, 1.0), FINALPOW));
+}
+
+vec4 encode(float vis, float fade, float z) {
+  float a = 1.0 - INTENSITY * (1.0 - vis);
+  float v = a + (1.0 - a) * fade;
+  v = pow(clamp(v, 0.0, 1.0), OUTPOW);
+  vec4 sp = fract(clamp(z, 0.0, 1.0) * vec4(1.0, 255.0, 65025.0, 160581376.0));
+  return vec4(v, sp.xyz - sp.yzw * (1.0 / 255.0));
+}
+
+#if QUAD
+shared vec3 s_q[64];                                          // (sum.x, sum.y, z) per thread
+#endif
+
+void main() {
+  ivec2 size = ivec2(cb0.c[4].xy);
+  ivec2 lim = size - 1;
+#ifdef CONST_AO
+  // calibration only (sbs.py): a constant AO buffer, to measure how the game's lighting responds to the AO value
+  ivec2 pc = ivec2(gl_WorkGroupID.xy) * 8 + ivec2(gl_LocalInvocationIndex & 7u, gl_LocalInvocationIndex >> 3);
+  if (pc.x < size.x && pc.y < size.y)
+    imageStore(u0, pc, vec4(CONST_AO, 0.0, 0.0, 0.0));
+  return;
+#endif
+#if QUAD
+  uint lid = gl_LocalInvocationIndex;
+  uint qi = lid >> 2;
+  ivec2 p = ivec2(gl_WorkGroupID.xy) * 8 + ivec2(int(qi & 3u) * 2 + int(lid & 1u), int(qi >> 2) * 2 + int((lid >> 1) & 1u));
+  bool inside = p.x < size.x && p.y < size.y;
+  float z = linz(texelFetch(t0, min(p, lim), 0).x);
+  float fade = fadeOf(z);
+  bool act = inside && fade < 1.0;
+  vec2 sums = vec2(0.0);
+  if (act) {
+    // the quad's 4 pixels use the 4 direction pairs AND the 4 coarse step-jitter phases, so the pooled sums of every
+    // quad cover all of them (no 4x4 dither left after pooling); a 4x4 ordered pattern over quads rotates the
+    // pairing and adds a fine jitter offset
+    int rank = BAYER[((p.y >> 1) & 3) * 4 + ((p.x >> 1) & 3)];
+    int j = (p.x & 1) + 2 * (p.y & 1);
+#if JITTER == 2
+    float jitter = (float(j) + 0.5) / 4.0;                    // each pair its own step phase, same in every quad
+#elif JITTER
+    float jitter = (float(((j + rank) & 3) * 4 + (rank >> 2)) + 0.5) / 16.0;
+#else
+    float jitter = 0.5;                                       // fixed step positions: no dither pattern at all
+#endif
+    int pair0 = j;
+#if SLICES == 1 && JITTER == 2
+    pair0 = 2 * j;                                            // one direction per pixel: 0, 45, 90, 135 degrees per quad
+#elif SLICES == 1
+    pair0 = 2 * j + (rank & 1);                               // one direction per pixel: 0,2,4,6 or 1,3,5,7 per quad
+#endif
+    sums = gtaoSums(p, z, normalAt(p, z, lim), lim, pair0, jitter);
+  }
+  s_q[lid] = vec3(sums, act ? z : -1.0);
+  barrier();
+  if (!inside) return;
+  if (!act) {                                              // sky / beyond the fade: no occlusion, like HDAO
+    imageStore(u0, p, encode(1.0, 1.0, z));
+    return;
+  }
+  uint q0 = lid & ~3u;
+  for (uint k = 0u; k < 4u; k++) {
+    vec3 o = s_q[q0 + k];
+    if (q0 + k != lid && o.z > 0.0 && abs(o.z - z) < 0.05 * z)  // pool quad neighbours on the same surface
+      sums += o.xy;
+  }
+  imageStore(u0, p, encode(finish(sums), fade, z));
+#elif HALF
+  ivec2 q = ivec2(gl_GlobalInvocationID.xy) * 2;
+  if (q.x >= size.x || q.y >= size.y) return;
+  ivec2 pp[4] = ivec2[4](q, q + ivec2(1, 0), q + ivec2(0, 1), q + ivec2(1, 1));
+  float zz[4];
+  int best = 0;
+  for (int k = 0; k < 4; k++) {
+    zz[k] = depthAt(pp[k], lim);
+    if (zz[k] < zz[best]) best = k;
+  }
+#if JITTER == 2
+  float jitter = 0.5;                                         // same directions and steps in every quad: no pattern
+  int pair0 = 0;
+#else
+  int b = ((q.y >> 1) & 3) * 4 + ((q.x >> 1) & 3);
+  float jitter = (float(BAYER[b]) + 0.5) / 16.0;
+  int pair0 = BAYER[b] & 3;
+#endif
+  float zb = zz[best];
+  float visb = fadeOf(zb) >= 1.0 ? 1.0 : finish(gtaoSums(pp[best], zb, normalAt(pp[best], zb, lim), lim, pair0, jitter));
+  for (int k = 0; k < 4; k++) {
+    if (pp[k].x >= size.x || pp[k].y >= size.y) continue;
+    float fade = fadeOf(zz[k]);
+    float vis = visb;
+    if (fade < 1.0 && abs(zz[k] - zb) > 0.02 * zb)
+      vis = finish(gtaoSums(pp[k], zz[k], normalAt(pp[k], zz[k], lim), lim, pair0, jitter));
+    imageStore(u0, pp[k], fade >= 1.0 ? encode(1.0, 1.0, zz[k]) : encode(vis, fade, zz[k]));
+  }
+#else
+  ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+  if (p.x >= size.x || p.y >= size.y) return;
+  float z = depthAt(p, lim);
+  float fade = fadeOf(z);
+  if (!(fade < 1.0)) {
+    imageStore(u0, p, encode(1.0, 1.0, z));
+    return;
+  }
+  int b = (p.y & 3) * 4 + (p.x & 3);
+  int pair0 = BAYER[b] & 3;
+  float jitter = (float(BAYER[(b * 7 + 5) & 15]) + 0.5) / 16.0;
+  imageStore(u0, p, encode(finish(gtaoSums(p, z, normalAt(p, z, lim), lim, pair0, jitter)), fade, z));
+#endif
+}

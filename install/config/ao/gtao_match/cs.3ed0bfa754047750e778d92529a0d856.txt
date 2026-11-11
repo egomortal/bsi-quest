@@ -1,0 +1,3 @@
+variant 7364ebd6804325b8 cs.3ed0bfa754047750e778d92529a0d856.gtao_fit_match_real.ao.spv dispatch_scale 4 4 1
+variant bb03daade4764b71 cs.3ed0bfa754047750e778d92529a0d856.gtao_fit_match_real.ao.spv dispatch_scale 4 4 1
+variant any cs.3ed0bfa754047750e778d92529a0d856.gtao_fit_match_real.ao.spv dispatch_scale 4 4 1

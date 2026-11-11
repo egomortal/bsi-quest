@@ -1,4 +1,6 @@
 install/config/* -text
+install/config/** -text
+*.spv binary
 *.patch -text
 *.diff -text
 *.sh text eol=lf
