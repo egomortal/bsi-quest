@@ -44,10 +44,12 @@ adaptive or single submit per frame, more frames in flight, shadow-mask pass mer
 - Two display modes, chosen at install and switchable later: VR (stereo) and Flat (big virtual screen, one view).
 - One-script install from a Windows PC: checks the game build, installs the app, copies game data, driver and settings.
   One-zip download with double-click starters (`Install.bat`, `Switch-Mode.bat`, `Send-Report.bat`).
-- Fixed after the first real install (11 Nov 2026): on a fresh install the copy failed with `secure_mkdirs failed:
-  Operation not permitted`, because only the headset may create the app's data folder and it does so on the app's first
-  start. The installer now opens the app once first. It also finds adb where newer SideQuest keeps it
-  (`%APPDATA%\SideQuest\platform-tools`). README "If the install stops" has the manual fix for older downloads.
+- Fixed after the first real installs (11 Nov 2026): the copy failed with `secure_mkdirs failed: Operation not
+  permitted`, because current Quest software does not let adb push create folders inside the app's data folder. The
+  installer now opens the app once so the headset creates that folder, makes every game folder with `adb shell mkdir`
+  first and then copies into them; if a headset refuses even that, it copies to `/sdcard/BSI/BioShock Infinite`, which
+  the app also reads. It now also grants the app's storage access (a fresh install had none, so the app could not read
+  `/sdcard/BSI`), and finds adb where newer SideQuest keeps it (`%APPDATA%\SideQuest\platform-tools`).
 
 ## Tooling
 

@@ -219,8 +219,8 @@ the same picture as before, proven by a bit-for-bit comparison, and that is the 
     12 fps until the checkpoint is reloaded); it is waiting for its headset test.
   A build moves to stable after it has been played without problems. Both use the same installer. Android does not
   install an older build over a newer one: going back from experimental to stable means uninstalling the app first,
-  which also removes the game data copied to the headset, so the installer has to copy it again. Saves and settings
-  live in `/sdcard/BSI` and are kept.
+  which also removes the game data copied to the headset, so the installer has to copy it again (unless it went to
+  `/sdcard/BSI/BioShock Infinite`, see "If the install stops"). Saves and settings live in `/sdcard/BSI` and are kept.
 - Tested on one Quest 3 with the current Steam build of the game. Other game builds are rejected by the installer.
 - What has been done so far is in `CHANGELOG.md`, including the ideas that were measured and rejected.
 
