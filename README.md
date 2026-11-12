@@ -135,6 +135,9 @@ SideQuest's wireless connection or any emulator, so that only the headset is con
 
 **Anything else:** open an issue and paste the whole text of the installer window.
 
+`FAQ.md` answers the common questions about installing and playing (black screen, choppy turning, missing HUD,
+shadows in one eye, motion controls) with the most likely cause of each.
+
 ## Two ways to play: VR or Flat
 
 | Mode | What you get | Speed |
